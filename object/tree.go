@@ -88,12 +88,8 @@ func (t Tree) MarshalBinary() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	for _, name := range t.Names() {
 		ti := t[name]
-		if _, err := fmt.Fprintf(buf, "%o %s\x00", ti.Mode, name); err != nil {
-			return nil, err
-		}
-		if _, err := buf.Write(ti.Object[:]); err != nil {
-			return nil, err
-		}
+		fmt.Fprintf(buf, "%o %s\x00", ti.Mode, name)
+		buf.Write(ti.Object[:])
 	}
 	return prependHeader(TypeTree, buf.Bytes())
 }
@@ -122,15 +118,12 @@ func (t Tree) MarshalText() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	for _, name := range t.Names() {
 		ti := t[name]
-		_, err := fmt.Fprintf(buf, "%06o %s %x\t%s\n",
+		fmt.Fprintf(buf, "%06o %s %x\t%s\n",
 			ti.Mode,
 			ti.Mode.Type(),
 			ti.Object,
 			name,
 		)
-		if err != nil {
-			return nil, err
-		}
 	}
 	return buf.Bytes(), nil
 }
