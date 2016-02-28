@@ -118,7 +118,7 @@ func (t Tree) MarshalText() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	for _, name := range t.Names() {
 		ti := t[name]
-		fmt.Fprintf(buf, "%06o %s %x\t%s\n",
+		fmt.Fprintf(buf, "%06o %s %s\t%s\n",
 			ti.Mode,
 			ti.Mode.Type(),
 			ti.Object,
