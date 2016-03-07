@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+// A safeString is a string that may not contain the bytes [\x00\x0A<>]
+// nor begin nor end with the bytes [ .,:;<>"'].  safeStrings are used
+// as author names and e-mail addresses in Git.
+type safeString string
+
+func (s *safeString) Scan(ss fmt.ScanState, verb rune) error {
+	safe, err := getToken(ss, "\x00\x0A<>", " .,:;<>\"'")
+	if err != nil {
+		return err
+	}
+	*s = safeString(safe)
+	return nil
+}
+
+// getToken finds the longest prefix of ss that contains no runes in
+// delimset and returns it trimmed of all leading and trailing runes in
+// trimset.
+func getToken(ss fmt.ScanState, delimset, trimset string) (string, error) {
+	p := func(r rune) bool { return !strings.ContainsRune(delimset, r) }
+	tok, err := ss.Token(false, p)
+	if err != nil {
+		return "", err
+	}
+	return strings.Trim(string(tok), trimset), nil
+}
+
 // A Signature tells the author and date of a Git commit or tag.
 type Signature struct {
 	Name  string
@@ -33,37 +59,30 @@ func (s Signature) String() string {
 // ignored; Scan always attempts to read a signature string as returned
 // by String from the input.
 func (s *Signature) Scan(ss fmt.ScanState, verb rune) error {
-	name, err := getToken(ss, '<')
+	var (
+		name   safeString
+		email  safeString
+		unix   int64
+		offset int
+	)
+	// XXX(lor): There should be a space between %s and <%s> in the
+	// format string, but unfortunately scanning a safeString stops
+	// only at an angle bracket, at which point it's too late to
+	// unread the preceding space back into the scanner.
+	_, err := fmt.Fscanf(ss, "%s<%s> %d %05d",
+		&name,
+		&email,
+		&unix,
+		&offset,
+	)
 	if err != nil {
-		return err
-	}
-	email, err := getToken(ss, '>')
-	if err != nil {
-		return err
-	}
-	var unix int64
-	var offset int
-	if _, err := fmt.Fscanf(ss, "%d %05d", &unix, &offset); err != nil {
 		return err
 	}
 	offset = (offset/100)*60*60 + (offset%100)*60
-	s.Name = strings.TrimSuffix(name, " ")
-	s.Email = email
+	s.Name = string(name)
+	s.Email = string(email)
 	s.Date = time.Unix(unix, 0).In(time.FixedZone("", offset))
 	return nil
-}
-
-// getToken reads runes from a fmt.ScanState until the given delimiter,
-// returning the read runes without the delimiter as a string.
-// The delimiter is not fed back to the fmt.ScanState with UnreadRune.
-func getToken(state fmt.ScanState, delim rune) (string, error) {
-	p := func(r rune) bool { return r != delim }
-	tok, err := state.Token(false, p)
-	if err != nil {
-		return "", err
-	}
-	state.ReadRune()
-	return string(tok), nil
 }
 
 // defaultMarshalText is the common function for serializing Commit and
