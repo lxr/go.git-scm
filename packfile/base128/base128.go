@@ -12,10 +12,12 @@ package base128
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 )
 
 // ReadLE reads a little-endian base128-encoded number from r.
+// It returns an error if the encoded number does not fit in 64 bits.
 func ReadLE(r io.ByteReader) (uint64, error) {
 	return binary.ReadUvarint(r)
 }
@@ -29,6 +31,7 @@ func WriteLE(w io.Writer, x uint64) error {
 }
 
 // ReadMBE reads a modified big-endian base128-encoded number from r.
+// It returns an error if the encoded number does not fit in 64 bits.
 func ReadMBE(r io.ByteReader) (uint64, error) {
 	c, err := r.ReadByte()
 	if err != nil {
@@ -36,6 +39,9 @@ func ReadMBE(r io.ByteReader) (uint64, error) {
 	}
 	x := uint64(c & 0x7F)
 	for c&0x80 != 0 {
+		if x >= 1<<57-1 {
+			return x, errors.New("base128: MBE-encoded number overflows a 64-bit integer")
+		}
 		c, err = r.ReadByte()
 		if err != nil {
 			return x, err
