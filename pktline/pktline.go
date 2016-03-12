@@ -140,7 +140,10 @@ func (w *Writer) Write(p []byte) (int, error) {
 	if len(p) > MaxPayloadLen {
 		return 0, ErrTooLong
 	}
-	return fmt.Fprintf(w.w, "%04x%s", len(p)+4, p)
+	if _, err := fmt.Fprintf(w.w, "%04x", len(p)+4); err != nil {
+		return 0, err
+	}
+	return w.w.Write(p)
 }
 
 // WriteString writes s as a single pkt-line record.  It behaves like
