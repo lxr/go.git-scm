@@ -16,7 +16,6 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
-	"hash"
 	"io"
 
 	"github.com/lxr/go.git-scm/object"
@@ -55,9 +54,8 @@ type header struct {
 
 // A Reader reads Git objects from a packfile stream.
 type Reader struct {
-	r      *posReader
-	n      int64
-	digest hash.Hash
+	r *digestReader
+	n int64
 
 	// XXX(lor): A Reader must maintain a private reference to all
 	// objects it has read, as any one of them can potentially be
@@ -80,11 +78,12 @@ type Reader struct {
 
 // NewReader creates a new Reader from r.  It returns an error if r
 // does not begin with a packfile header, if the packfile version is
-// unsupported, or if trying to read the header failed.
+// unsupported, or if trying to read the header failed.  If r does not
+// also implement io.ByteReader, the returned Reader may read more data
+// than necessary from r.
 func NewReader(r io.Reader) (*Reader, error) {
 	p := new(Reader)
-	p.digest = sha1.New()
-	p.r = &posReader{r: io.TeeReader(r, p.digest)}
+	p.r = newDigestReader(r, sha1.New())
 	var h header
 	err := binary.Read(p.r, binary.BigEndian, &h)
 	switch {
@@ -207,7 +206,7 @@ func (r *Reader) readObject() (obj object.Interface, err error) {
 // the checksum accumulated by NewReader and the readObject calls.
 func (r *Reader) readChecksum() error {
 	var my, other [sha1.Size]byte
-	copy(my[:], r.digest.Sum(nil))
+	copy(my[:], r.r.Sum(nil))
 	_, err := io.ReadFull(r.r, other[:])
 	if err == nil && my != other {
 		err = ErrChecksum
@@ -217,9 +216,8 @@ func (r *Reader) readChecksum() error {
 
 // A Writer writes Git objects to a packfile stream.
 type Writer struct {
-	w      *posWriter
-	n      int64
-	digest hash.Hash
+	w *digestWriter
+	n int64
 }
 
 // NewWriter creates a new Writer from w.  n is the number of objects
@@ -232,8 +230,7 @@ func NewWriter(w io.Writer, n int64) (*Writer, error) {
 	}
 	pfw := new(Writer)
 	pfw.n = n
-	pfw.digest = sha1.New()
-	pfw.w = &posWriter{w: io.MultiWriter(w, pfw.digest)}
+	pfw.w = newDigestWriter(w, sha1.New())
 	h := header{signature, 3, uint32(n)}
 	return pfw, binary.Write(pfw.w, binary.BigEndian, h)
 }
@@ -267,6 +264,6 @@ func (w *Writer) Write(obj object.Interface) error {
 // Close writes the packfile SHA-1 footer to the stream.  It does not
 // close the underlying writer.
 func (w *Writer) Close() error {
-	_, err := w.w.Write(w.digest.Sum(nil))
+	_, err := w.w.Write(w.w.Sum(nil))
 	return err
 }
