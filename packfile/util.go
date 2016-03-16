@@ -34,7 +34,8 @@ func writeObjHeader(w io.Writer, objType object.Type, size int64) error {
 		return errors.New("packfile: object size out of range")
 	}
 	hdr := uint64((size &^ 0xF << 3) | int64(objType<<4) | (size & 0xF))
-	return base128.WriteLE(w, hdr)
+	_, err := base128.WriteLE(w, hdr)
+	return err
 }
 
 // A digestReader tracks the number and checksum of bytes read from an

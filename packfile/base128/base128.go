@@ -22,12 +22,12 @@ func ReadLE(r io.ByteReader) (uint64, error) {
 	return binary.ReadUvarint(r)
 }
 
-// WriteLE writes a little-endian base128-encoded number to w.
-func WriteLE(w io.Writer, x uint64) error {
-	p := make([]byte, 10)
-	n := binary.PutUvarint(p, x)
-	n, err := w.Write(p[:n])
-	return err
+// WriteLE writes a little-endian base128-encoded number to w and
+// returns the number of bytes written.
+func WriteLE(w io.Writer, x uint64) (int, error) {
+	var p [10]byte
+	n := binary.PutUvarint(p[:], x)
+	return w.Write(p[:n])
 }
 
 // ReadMBE reads a modified big-endian base128-encoded number from r.
@@ -51,16 +51,17 @@ func ReadMBE(r io.ByteReader) (uint64, error) {
 	return x, nil
 }
 
-// WriteMBE writes a modified big-endian base128-encoded number to w.
-func WriteMBE(w io.Writer, x uint64) error {
-	c := byte(x & 0x7F)
-	p := []byte{c}
+// WriteMBE writes a modified big-endian base128-encoded number to w
+// and returns the number of bytes written.
+func WriteMBE(w io.Writer, x uint64) (int, error) {
+	var p [10]byte
+	i := len(p) - 1
+	p[i] = byte(x) & 0x7F
 	x = x>>7 - 1
 	for x != ^uint64(0) {
-		c = byte(x & 0x7F)
-		p = append([]byte{c | 0x80}, p...)
+		i--
+		p[i] = byte(x) | 0x80
 		x = x>>7 - 1
 	}
-	_, err := w.Write(p)
-	return err
+	return w.Write(p[i:])
 }
