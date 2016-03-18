@@ -80,7 +80,8 @@ type Reader struct {
 // does not begin with a packfile header, if the packfile version is
 // unsupported, or if trying to read the header failed.  If r does not
 // also implement io.ByteReader, the returned Reader may read more data
-// than necessary from r.
+// than necessary from r.  It is the caller's responsibility to call
+// Close on the Reader when all objects have been read.
 func NewReader(r io.Reader) (*Reader, error) {
 	p := new(Reader)
 	p.r = newDigestReader(r, sha1.New())
@@ -106,25 +107,12 @@ func (r *Reader) Len() int64 {
 }
 
 // Read returns the next object in the stream, or nil, io.EOF if there
-// are no more objects.  It returns nil, ErrChecksum if the packfile
-// ends with an invalid checksum.
+// are no more objects.
 func (r *Reader) Read() (obj object.Interface, err error) {
-	if r.n > 0 {
-		obj, err = r.readObject()
-		if err == nil {
-			r.n--
-		}
-	} else {
-		err = r.readChecksum()
-		if err == nil {
-			err = io.EOF
-		}
+	if r.n == 0 {
+		return nil, io.EOF
 	}
-	return
-}
 
-// readObject returns the next object in the stream.
-func (r *Reader) readObject() (obj object.Interface, err error) {
 	pos := r.r.Tell()
 	objType, size, err := readObjHeader(r.r)
 	if err != nil {
@@ -199,12 +187,15 @@ func (r *Reader) readObject() (obj object.Interface, err error) {
 	}
 	r.ofs[pos] = obj
 	r.ref[id] = obj
+	r.n--
 	return
 }
 
-// readChecksum reads the SHA-1 footer of a packfile and compares it to
-// the checksum accumulated by NewReader and the readObject calls.
-func (r *Reader) readChecksum() error {
+// Close reads and verifies the packfile SHA-1 footer from the stream.
+// It returns ErrChecksum if the checksum is not valid.  It does not
+// close the underlying reader.  This method should only be called when
+// all objects have been read.
+func (r *Reader) Close() error {
 	var my, other [sha1.Size]byte
 	copy(my[:], r.r.Sum(nil))
 	_, err := io.ReadFull(r.r, other[:])
@@ -233,6 +224,12 @@ func NewWriter(w io.Writer, n int64) (*Writer, error) {
 	pfw.w = newDigestWriter(w, sha1.New())
 	h := header{signature, 3, uint32(n)}
 	return pfw, binary.Write(pfw.w, binary.BigEndian, h)
+}
+
+// Len returns the number of objects that still need to be written to
+// the packfile.
+func (w *Writer) Len() int64 {
+	return w.n
 }
 
 // BUG(lor): Writer.Write writes all its arguments as full objects;

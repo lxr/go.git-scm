@@ -90,5 +90,5 @@ func unpack(repo repository.Interface, r io.Reader) error {
 			return err
 		}
 	}
-	return nil
+	return pfr.Close()
 }
