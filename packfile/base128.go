@@ -43,7 +43,7 @@ func readBase128LE(r io.ByteReader) (uint64, error) {
 // writeBase128LE writes a little-endian base128-encoded number to w
 // and returns the number of bytes written.
 func writeBase128LE(w io.Writer, x uint64) (int, error) {
-	var p [10]byte
+	var p [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(p[:], x)
 	return w.Write(p[:n])
 }
@@ -73,7 +73,7 @@ func readBase128MBE(r io.ByteReader) (uint64, error) {
 // writeBase128MBE writes a modified big-endian base128-encoded number
 // to w and returns the number of bytes written.
 func writeBase128MBE(w io.Writer, x uint64) (int, error) {
-	var p [10]byte
+	var p [binary.MaxVarintLen64]byte
 	i := len(p) - 1
 	p[i] = byte(x) & 0x7F
 	x = x>>7 - 1
