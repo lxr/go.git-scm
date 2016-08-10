@@ -7,6 +7,13 @@
 // already been sent with status code 200.
 package http
 
+// BUG(lor): This package is implemented as a thin wrapper around the
+// protocol package, whose functions assume that concurrent reading and
+// writing of the request and response is possible.  However, on some
+// HTTP protocol stack configurations it is not be possible to read from
+// the request body once the response writer has been written to, which
+// breaks this assumption.
+
 import (
 	"bytes"
 	"fmt"
@@ -24,6 +31,11 @@ func AdvertiseRefs(repo repository.Interface, w http.ResponseWriter, r *http.Req
 	service := r.FormValue("service")
 	w.Header().Set("Content-Type", fmt.Sprintf("application/x-%s-advertisement", service))
 	w.Header().Set("Cache-Control", "no-cache")
+	// Any error in protocol.AdvertiseRefs must be caught and
+	// reported prior to the pktw prints, as they cause the HTTP
+	// response to be written with a successful status code.  We
+	// thus need to capture AdvertiseRefs's output in a buffer
+	// and copy it out later.
 	buf := new(bytes.Buffer)
 	if err := protocol.AdvertiseRefs(repo, buf); err != nil {
 		httpError(w, err)
