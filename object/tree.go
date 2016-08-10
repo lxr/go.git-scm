@@ -45,7 +45,7 @@ const (
 	ModeTree    TreeMode = 0040000 // tree, directory
 	ModeBlob    TreeMode = 0100644 // blob, file
 	ModeExec    TreeMode = 0100755 // blob, file
-	ModeSymlink TreeMode = 0120000 // blob, file
+	ModeSymlink TreeMode = 0120000 // blob, symlink
 	ModeGitlink TreeMode = 0160000 // commit, directory
 )
 
