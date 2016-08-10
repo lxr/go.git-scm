@@ -9,6 +9,7 @@ package packfile
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"io"
@@ -58,4 +59,9 @@ func unmarshalObj(obj object.Interface, data []byte) error {
 	}
 	header := []byte(fmt.Sprintf("%s %d\x00", objType, len(data)))
 	return obj.UnmarshalBinary(append(header, data...))
+}
+
+func hashObj(objType object.Type, data []byte) object.ID {
+	header := []byte(fmt.Sprintf("%s %d\x00", objType, len(data)))
+	return object.ID(sha1.Sum(append(header, data...)))
 }

@@ -7,10 +7,6 @@
 // use this option, however.)
 package packfile
 
-// BUG(lor): "Thin" packfiles are not supported: a packfile must contain
-// the base objects of all its deltas so that they can be resolved
-// without recourse to a repository.
-
 import (
 	"compress/zlib"
 	"crypto/sha1"
@@ -19,13 +15,14 @@ import (
 	"io"
 
 	"github.com/lxr/go.git-scm/object"
+	"github.com/lxr/go.git-scm/repository"
 )
 
 var (
-	// ErrBadBase is returned when reading packfile data where the
-	// base offset or ID of a delta object does not refer to an
+	// ErrBadOffset is returned when reading packfile data where
+	// the base offset of an ofs-delta object does not refer to an
 	// earlier object in the stream.
-	ErrBadBase = errors.New("packfile: unknown base for delta object")
+	ErrBadOffset = errors.New("packfile: delta base offset does not point at an object boundary")
 	// ErrChecksum is returned when reading packfile data that has
 	// an invalid checksum.
 	ErrChecksum = errors.New("packfile: invalid checksum")
@@ -51,26 +48,21 @@ type header struct {
 
 // A Reader reads Git objects from a packfile stream.
 type Reader struct {
-	r *digestReader
-	n int64
-
-	// XXX(lor): A Reader must maintain a private reference to all
-	// objects it has read, as any one of them can potentially be
-	// the base object of a future delta.  The cost in memory is
-	// unfortunate, but I can think of no alternative that wouldn't
-	// either complicate the implementation or require packfiles to
-	// always go hand-in-hand with repositories.
-	ofs map[int64]*baseObj
-	ref map[object.ID]*baseObj
+	r    *digestReader
+	n    int64
+	ofs  map[int64]object.ID
+	repo repository.Interface
 }
 
 // NewReader creates a new Reader from r.  It returns an error if r
 // does not begin with a packfile header, if the packfile version is
-// unsupported, or if trying to read the header failed.  If r does not
-// also implement io.ByteReader, the returned Reader may read more data
-// than necessary from r.  It is the caller's responsibility to call
-// Close on the Reader after all objects have been read.
-func NewReader(r io.Reader) (*Reader, error) {
+// unsupported, or if trying to read the header failed.  repo will be
+// used to resolve delta objects into full ones; it must contain all
+// potential base objects.  (The caller may have to enforce this by
+// adding each read object to the repository.)  It is the caller's
+// responsibility to call Close on the Reader after all objects have
+// been read.
+func NewReader(r io.Reader, repo repository.Interface) (*Reader, error) {
 	dr := newDigestReader(r, sha1.New())
 	var h header
 	err := binary.Read(dr, binary.BigEndian, &h)
@@ -83,10 +75,10 @@ func NewReader(r io.Reader) (*Reader, error) {
 		return nil, ErrVersion
 	}
 	return &Reader{
-		r:   dr,
-		n:   int64(h.Nobjects),
-		ofs: make(map[int64]*baseObj),
-		ref: make(map[object.ID]*baseObj),
+		r:    dr,
+		n:    int64(h.Nobjects),
+		ofs:  make(map[int64]object.ID),
+		repo: repo,
 	}, nil
 }
 
@@ -98,17 +90,21 @@ func (r *Reader) Len() int64 {
 // Read returns the next object in the stream, or nil, io.EOF if there
 // are no more objects.
 func (r *Reader) Read() (obj object.Interface, err error) {
+	// check if there are objects to read, and if so, record the
+	// current position as the start of a new object
 	if r.n == 0 {
 		return nil, io.EOF
 	}
-
 	pos := r.r.Tell()
+
+	// read object header
 	objType, size, err := readObjHeader(r.r)
 	if err != nil {
 		return
 	}
 
-	var base *baseObj
+	// if object is a delta, read its base object reference
+	var baseID object.ID
 	switch objType {
 	case offsetDelta:
 		negOfs, err := readBase128MBE(r.r)
@@ -118,23 +114,18 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 		case int64(negOfs) < 0:
 			return nil, errors.New("packfile: delta offset overflows int64")
 		}
-		obj, ok := r.ofs[pos-int64(negOfs)]
+		var ok bool
+		baseID, ok = r.ofs[pos-int64(negOfs)]
 		if !ok {
-			return nil, ErrBadBase
+			return nil, ErrBadOffset
 		}
-		base = obj
 	case refDelta:
-		var baseID object.ID
-		if _, err := io.ReadFull(r.r, baseID[:]); err != nil {
-			return nil, err
+		if _, err = io.ReadFull(r.r, baseID[:]); err != nil {
+			return
 		}
-		obj, ok := r.ref[baseID]
-		if !ok {
-			return nil, ErrBadBase
-		}
-		base = obj
 	}
 
+	// read object body
 	zr, err := zlib.NewReader(r.r)
 	if err != nil {
 		return
@@ -152,13 +143,29 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 	var dummy [4]byte
 	zr.Read(dummy[:])
 
-	if base != nil {
-		objType = base.objType
-		data, err = applyDelta(base.data, data)
+	// if object is a delta, retrieve its base object and apply
+	// the delta to it
+	if baseID != object.ZeroID {
+		var (
+			base     object.Interface
+			baseData []byte
+		)
+		base, err = r.repo.GetObject(baseID)
 		if err != nil {
 			return
 		}
+		baseData, err = marshalObj(base)
+		if err != nil {
+			return
+		}
+		data, err = applyDelta(baseData, data)
+		if err != nil {
+			return
+		}
+		objType = object.TypeOf(base)
 	}
+
+	// unmarshal the object
 	obj, err = object.New(objType)
 	if err != nil {
 		return
@@ -168,13 +175,8 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 		return
 	}
 
-	id, err := object.Hash(obj)
-	if err != nil {
-		return
-	}
-	base = &baseObj{objType, data}
-	r.ofs[pos] = base
-	r.ref[id] = base
+	// update bookkeeping data and return the object
+	r.ofs[pos] = hashObj(objType, data)
 	r.n--
 	return
 }

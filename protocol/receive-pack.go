@@ -76,7 +76,7 @@ func onlyDeleteCommandsIn(cmds []receiveCmd) bool {
 }
 
 func unpack(repo repository.Interface, r io.Reader) error {
-	pfr, err := packfile.NewReader(r)
+	pfr, err := packfile.NewReader(r, repo)
 	if err != nil {
 		return err
 	}

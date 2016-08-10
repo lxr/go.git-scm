@@ -16,7 +16,6 @@ var Capabilities = CapList{
 	"report-status":      true,
 	"delete-refs":        true,
 	"ofs-delta":          true,
-	"no-thin":            true,
 	"multi_ack_detailed": true,
 }
 
