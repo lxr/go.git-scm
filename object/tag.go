@@ -5,7 +5,7 @@ type Tag struct {
 	Object  ID        // ID of the tagged object
 	Type    Type      // type of the tagged object
 	Tag     string    // tag name
-	Tagger  Signature // tag author's signature
+	Tagger  Signature // tagger name and date
 	Message string    // a tag message
 }
 

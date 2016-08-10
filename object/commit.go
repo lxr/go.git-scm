@@ -5,8 +5,8 @@ package object
 type Commit struct {
 	Tree      ID        // ID of the commit's root tree
 	Parent    []ID      // the commit's parents
-	Author    Signature // the commit author's signature
-	Committer Signature // the actual committer's signature
+	Author    Signature // author name and date
+	Committer Signature // committer name and date
 	Message   string    // a commit message
 }
 
