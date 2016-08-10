@@ -36,18 +36,17 @@ func newDigestReader(r io.Reader, h hash.Hash) *digestReader {
 func (r *digestReader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
 	r.pos += int64(n)
-	if err == nil {
-		_, err = r.digest.Write(p[:n])
-	}
+	r.digest.Write(p[:n])
 	return n, err
 }
 
 func (r *digestReader) ReadByte() (byte, error) {
 	c, err := r.r.ReadByte()
-	if err == nil {
-		r.pos++
-		_, err = r.digest.Write([]byte{c})
+	if err != nil {
+		return 0, err
 	}
+	r.pos++
+	r.digest.Write([]byte{c})
 	return c, err
 }
 
@@ -82,8 +81,6 @@ func (w *digestWriter) Tell() int64 {
 func (w *digestWriter) Write(p []byte) (int, error) {
 	n, err := w.w.Write(p)
 	w.pos += int64(n)
-	if err == nil {
-		_, err = w.digest.Write(p[:n])
-	}
+	w.digest.Write(p[:n])
 	return n, err
 }
