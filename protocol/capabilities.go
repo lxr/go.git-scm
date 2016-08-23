@@ -1,13 +1,8 @@
 package protocol
 
 import (
-	"bytes"
 	"fmt"
-	"io"
-	"reflect"
 	"strings"
-
-	"github.com/lxr/go.git-scm/pktline"
 )
 
 // Capabilities is the set of protocol capabilities supported by this
@@ -22,6 +17,18 @@ var Capabilities = CapList{
 // A CapList represents a set of Git protocol capabilities.
 type CapList map[string]bool
 
+// diff returns a capability listing containing those capabilities in c
+// that are not in d.
+func (c CapList) diff(d CapList) CapList {
+	e := make(CapList)
+	for cap, ok := range c {
+		if ok && !d[cap] {
+			e[cap] = true
+		}
+	}
+	return e
+}
+
 // String returns the capabilities in c joined by spaces.
 func (c CapList) String() string {
 	capList := make([]string, len(c))
@@ -35,56 +42,23 @@ func (c CapList) String() string {
 	return strings.Join(capList[:i], " ")
 }
 
-// ParseCapList parses a whitespace-separated list of capabilities.
-func ParseCapList(s string) CapList {
-	c := make(CapList)
-	for _, cp := range strings.Fields(s) {
-		c[cp] = true
+// Scan is a support routine for fmt.Scanner.  The format verb is
+// ignored; Scan always tries to extract a list of space-separated
+// capability keywords from ss.
+func (c *CapList) Scan(ss fmt.ScanState, verb rune) error {
+	if *c == nil {
+		*c = make(CapList)
 	}
-	return c
-}
-
-// diff returns the set of capabilities that are in a but not in b.
-func diff(a, b CapList) CapList {
-	c := make(CapList)
-	for cp, ok := range a {
-		if ok && !b[cp] {
-			c[cp] = true
-		}
-	}
-	return c
-}
-
-// scanCmds scans a list of pkt-line records to l, which must be of type
-// *[]T, where *T can be fmt.Scanned into.  For the first pkt-line,
-// anything left over from the scan is interpreted as a list of protocol
-// capabilities and returned as c.
-func scanCmds(pktr *pktline.Reader, l interface{}) (c CapList, err error) {
-	if err := pktr.Next(); err != nil {
-		return nil, err
-	}
-	v := reflect.ValueOf(l).Elem()
-	t := v.Type().Elem()
-	var msg []byte
 	for {
-		msg, err = pktr.ReadMsg()
-		switch {
-		case err == io.EOF:
-			return c, nil
-		case err != nil:
-			return c, err
+		tok, err := ss.Token(true, nil)
+		// ss.Token (apparently?) indicates end-of-input by
+		// returning [], nil, not [], io.EOF.
+		if len(tok) == 0 {
+			return nil
+		} else if err != nil {
+			return err
 		}
-		buf := bytes.NewBuffer(msg)
-		x := reflect.New(t)
-		if _, err := fmt.Fscan(buf, x.Interface()); err != nil {
-			return nil, err
-		}
-		v.Set(reflect.Append(v, x.Elem()))
-		if c == nil {
-			c = ParseCapList(buf.String())
-			if d := diff(c, Capabilities); len(d) != 0 {
-				return nil, fmt.Errorf("unrecognized capabilities: %s", d)
-			}
-		}
+		(*c)[string(tok)] = true
 	}
+	return nil
 }

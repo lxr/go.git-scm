@@ -10,13 +10,6 @@ import (
 	"github.com/lxr/go.git-scm/repository"
 )
 
-type wantCmd object.ID
-
-func (c *wantCmd) Scan(ss fmt.ScanState, verb rune) error {
-	_, err := fmt.Fscanf(ss, "want %s", (*object.ID)(c))
-	return err
-}
-
 // BUG(lor): UploadPack does not understand the
 // shallow and deepen commands.
 
@@ -24,15 +17,25 @@ func (c *wantCmd) Scan(ss fmt.ScanState, verb rune) error {
 // wants and has and writes a packfile bridging the two sets to w.
 func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	pktr := pktline.NewReader(r)
-
-	var cmds []wantCmd
-	caps, err := scanCmds(pktr, &cmds)
-	if err != nil {
+	var want []object.ID
+	var caps CapList
+	if err := pktr.Next(); err != nil {
 		return err
 	}
-	want := make([]object.ID, len(cmds))
-	for i, cmd := range cmds {
-		want[i] = object.ID(cmd)
+	for {
+		var id object.ID
+		str, err := pktr.ReadMsgString()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		} else if n, err := fmt.Sscanf(str, "want %s %s", &id, &caps); n < 1 {
+			return err
+		}
+		want = append(want, id)
+	}
+	if d := caps.diff(Capabilities); len(d) > 0 {
+		return fmt.Errorf("unrecognized capabilities: %s", d)
 	}
 
 	pktw := pktline.NewWriter(w)
