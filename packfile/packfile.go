@@ -113,9 +113,9 @@ func (r *Reader) Len() int64 {
 	return r.n
 }
 
-// Read returns the next object in the stream, or nil, io.EOF if there
+// ReadObject returns the next object in the stream, or nil, io.EOF if there
 // are no more objects.
-func (r *Reader) Read() (obj object.Interface, err error) {
+func (r *Reader) ReadObject() (obj object.Interface, err error) {
 	// check if there are objects to read, and if so, record the
 	// current position as the start of a new object
 	if r.n == 0 {
@@ -257,13 +257,13 @@ func (w *Writer) Len() int64 {
 	return w.n
 }
 
-// BUG(lor): Writer.Write writes all its arguments as full objects;
-// it does not attempt to delta compress them.
+// BUG(lor): Writer.WriteObject writes all its arguments as full
+// objects; it does not attempt to delta compress them.
 
-// Write writes a Git object to the stream.  It returns
+// WriteObject writes a Git object to the stream.  It returns
 // nil, ErrTooManyObjects if trying to write more objects than were
 // specified in the call to NewWriter.
-func (w *Writer) Write(obj object.Interface) error {
+func (w *Writer) WriteObject(obj object.Interface) error {
 	if w.n == 0 {
 		return ErrTooManyObjects
 	}

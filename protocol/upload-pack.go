@@ -111,7 +111,7 @@ func writePack(w io.Writer, objs []object.Interface) error {
 		return err
 	}
 	for _, obj := range objs {
-		if err := pfw.Write(obj); err != nil {
+		if err := pfw.WriteObject(obj); err != nil {
 			return err
 		}
 	}
