@@ -62,9 +62,21 @@ type header struct {
 // A Reader reads Git objects from a packfile stream.
 type Reader struct {
 	r    *digestReader
+	zr   io.ReadCloser
 	n    int64
 	ofs  map[int64]object.ID
 	repo repository.Interface
+}
+
+// newZlibReader resets the cached io.ReadCloser to read from rr and
+// returns it.
+func (r *Reader) newZlibReader(rr io.Reader) (io.ReadCloser, error) {
+	if r.zr == nil {
+		var err error
+		r.zr, err = zlib.NewReader(rr)
+		return r.zr, err
+	}
+	return r.zr, r.zr.(zlib.Resetter).Reset(rr, nil)
 }
 
 // NewReader creates a new Reader from r.  It returns an error if r
@@ -89,6 +101,7 @@ func NewReader(r io.Reader, repo repository.Interface) (*Reader, error) {
 	}
 	return &Reader{
 		r:    dr,
+		zr:   nil,
 		n:    int64(h.Nobjects),
 		ofs:  make(map[int64]object.ID),
 		repo: repo,
@@ -139,7 +152,7 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 	}
 
 	// read object body
-	zr, err := zlib.NewReader(r.r)
+	zr, err := r.newZlibReader(r.r)
 	if err != nil {
 		return
 	}
@@ -209,8 +222,16 @@ func (r *Reader) Close() error {
 
 // A Writer writes Git objects to a packfile stream.
 type Writer struct {
-	w *digestWriter
-	n int64
+	w  *digestWriter
+	zw *zlib.Writer
+	n  int64
+}
+
+// newZlibWriter resets the cached *zlib.Writer to write to ww and
+// returns it.
+func (w *Writer) newZlibWriter(ww io.Writer) *zlib.Writer {
+	w.zw.Reset(ww)
+	return w.zw
 }
 
 // NewWriter creates a new Writer from w.  n is the number of objects
@@ -227,7 +248,7 @@ func NewWriter(w io.Writer, n int64) (*Writer, error) {
 	if err := binary.Write(dw, binary.BigEndian, h); err != nil {
 		return nil, err
 	}
-	return &Writer{dw, n}, nil
+	return &Writer{dw, zlib.NewWriter(nil), n}, nil
 }
 
 // Len returns the number of objects that still need to be written to
@@ -254,7 +275,7 @@ func (w *Writer) Write(obj object.Interface) error {
 	if err != nil {
 		return err
 	}
-	z := zlib.NewWriter(w.w)
+	z := w.newZlibWriter(w.w)
 	if _, err = z.Write(data); err != nil {
 		z.Close()
 		return err
