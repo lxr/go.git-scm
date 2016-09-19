@@ -18,6 +18,19 @@ import (
 	"github.com/lxr/go.git-scm/repository"
 )
 
+// If one happens to read the exact length of the compressed data from a
+// zlib reader, the zlib checksum isn't read.  flushZlib can be used to
+// read "past" the end of the zlib stream in order to consume and check
+// the checksum.
+func flushZlib(r io.Reader) error {
+	if _, err := io.ReadFull(r, []byte{0}); err != io.EOF {
+		return err
+	} else if err == nil {
+		return errors.New("zlib stream not at end")
+	}
+	return nil
+}
+
 var (
 	// ErrBadOffset is returned when reading packfile data where
 	// the base offset of an ofs-delta object does not refer to an
@@ -135,13 +148,9 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 	if _, err = io.ReadFull(zr, data); err != nil {
 		return
 	}
-	// If one reads the exact length of the compressed data from a
-	// zlib.Reader, as above, the zlib checksum isn't read, and the
-	// packfile stream is thus thrown out of sync.  One needs to
-	// read "past" the end of the data to get zlib to read and check
-	// the checksum.
-	var dummy [4]byte
-	zr.Read(dummy[:])
+	if err = flushZlib(zr); err != nil {
+		return
+	}
 
 	// if object is a delta, retrieve its base object and apply
 	// the delta to it
