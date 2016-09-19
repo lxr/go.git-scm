@@ -256,6 +256,7 @@ func (w *Writer) Write(obj object.Interface) error {
 	}
 	z := zlib.NewWriter(w.w)
 	if _, err = z.Write(data); err != nil {
+		z.Close()
 		return err
 	}
 	w.n--
