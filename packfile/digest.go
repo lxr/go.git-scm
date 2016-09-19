@@ -1,42 +1,17 @@
+// Git packfiles end with an SHA-1 checksum of their contents.  The
+// starting offsets of objects within the packfile also need to be
+// recorded for delta resolution.  This file defines convenience types
+// for reading from and writing to files while maintaining this
+// information.
+
 package packfile
 
 import (
 	"bufio"
 	"compress/flate"
-	"errors"
 	"hash"
 	"io"
-
-	"github.com/lxr/go.git-scm/object"
-	"github.com/lxr/go.git-scm/packfile/base128"
 )
-
-// A packfile object header is a little-endian base128-encoded number
-// where bits 4-6 encode the object's type and the rest its size.
-
-func readObjHeader(r io.ByteReader) (object.Type, int64, error) {
-	hdr, err := base128.ReadLE(r)
-	if err != nil {
-		return 0, 0, err
-	}
-	objType := object.Type(hdr >> 4 & 0x7)
-	size := int64((hdr >> 3 &^ 0xF) | (hdr & 0xF))
-	return objType, size, err
-}
-
-func writeObjHeader(w io.Writer, objType object.Type, size int64) error {
-	// XXX(lor): Objects larger than 2305843009213693951 bytes
-	// (0x1FFFFFFFFFFFFFFF in hex) cannot be read or written, as an
-	// object's size is internally represented as a 64-bit integer,
-	// of which three bits are reserved for encoding the object's
-	// type.
-	if size < 0 || size > 0x1FFFFFFFFFFFFFFF {
-		return errors.New("packfile: object size out of range")
-	}
-	hdr := uint64((size &^ 0xF << 3) | int64(objType<<4) | (size & 0xF))
-	_, err := base128.WriteLE(w, hdr)
-	return err
-}
 
 // A digestReader tracks the number and checksum of bytes read from an
 // underlying io.Reader.  As a local convenience, it also implements

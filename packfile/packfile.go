@@ -3,8 +3,8 @@
 // for details.  Version 2 packfiles can also be read, but they will
 // fail with an unhelpful error message if they use the version 2
 // -specific delta object copy mode that copies from the result buffer
-// instead of the source one.  (No known packfiles use this option,
-// however.)
+// instead of the source one.  (It is unknown if any packfiles actually
+// use this option, however.)
 package packfile
 
 // BUG(lor): "Thin" packfiles are not supported: a packfile must contain
@@ -19,9 +19,6 @@ import (
 	"io"
 
 	"github.com/lxr/go.git-scm/object"
-	"github.com/lxr/go.git-scm/packfile/base128"
-	"github.com/lxr/go.git-scm/packfile/delta"
-	"github.com/lxr/go.git-scm/packfile/internal"
 )
 
 var (
@@ -63,17 +60,8 @@ type Reader struct {
 	// unfortunate, but I can think of no alternative that wouldn't
 	// either complicate the implementation or require packfiles to
 	// always go hand-in-hand with repositories.
-	//
-	// Memoing objects as object.Interfaces is also a bit silly, as
-	// resolving a delta requires marshaling the base object into a
-	// byte slice to start with.  This results in a lot of pointless
-	// marshaling/unmarshaling overhead, but the alternative is to
-	// expose a byte-slice-to-byte-slice interface in
-	// packfile/delta, which I don't really want to do, as Git
-	// deltas are semantically computed between Git objects and not
-	// random blobs of bytes.
-	ofs map[int64]object.Interface
-	ref map[object.ID]object.Interface
+	ofs map[int64]*baseObj
+	ref map[object.ID]*baseObj
 }
 
 // NewReader creates a new Reader from r.  It returns an error if r
@@ -81,24 +69,25 @@ type Reader struct {
 // unsupported, or if trying to read the header failed.  If r does not
 // also implement io.ByteReader, the returned Reader may read more data
 // than necessary from r.  It is the caller's responsibility to call
-// Close on the Reader when all objects have been read.
+// Close on the Reader after all objects have been read.
 func NewReader(r io.Reader) (*Reader, error) {
-	p := new(Reader)
-	p.r = newDigestReader(r, sha1.New())
+	dr := newDigestReader(r, sha1.New())
 	var h header
-	err := binary.Read(p.r, binary.BigEndian, &h)
+	err := binary.Read(dr, binary.BigEndian, &h)
 	switch {
 	case err != nil:
-		err = err
+		return nil, err
 	case h.Signature != signature:
-		err = ErrHeader
+		return nil, ErrHeader
 	case h.Version < 2 || h.Version > 3:
-		err = ErrVersion
+		return nil, ErrVersion
 	}
-	p.n = int64(h.Nobjects)
-	p.ofs = make(map[int64]object.Interface)
-	p.ref = make(map[object.ID]object.Interface)
-	return p, err
+	return &Reader{
+		r:   dr,
+		n:   int64(h.Nobjects),
+		ofs: make(map[int64]*baseObj),
+		ref: make(map[object.ID]*baseObj),
+	}, nil
 }
 
 // Len returns the number of objects remaining in the packfile.
@@ -119,28 +108,31 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 		return
 	}
 
-	ok := true
-	var base object.Interface
+	var base *baseObj
 	switch objType {
-	case delta.TypeOffset:
-		var negOfs uint64
-		negOfs, err = base128.ReadMBE(r.r)
-		if int64(negOfs) < 0 {
-			err = errors.New("packfile: delta offset overflows int64")
-			break
+	case offsetDelta:
+		negOfs, err := readBase128MBE(r.r)
+		switch {
+		case err != nil:
+			return nil, err
+		case int64(negOfs) < 0:
+			return nil, errors.New("packfile: delta offset overflows int64")
 		}
-		base, ok = r.ofs[pos-int64(negOfs)]
-	case delta.TypeRef:
+		obj, ok := r.ofs[pos-int64(negOfs)]
+		if !ok {
+			return nil, ErrBadBase
+		}
+		base = obj
+	case refDelta:
 		var baseID object.ID
-		_, err = io.ReadFull(r.r, baseID[:])
-		base, ok = r.ref[baseID]
-	}
-	switch {
-	case err != nil:
-		return
-	case !ok:
-		err = ErrBadBase
-		return
+		if _, err := io.ReadFull(r.r, baseID[:]); err != nil {
+			return nil, err
+		}
+		obj, ok := r.ref[baseID]
+		if !ok {
+			return nil, ErrBadBase
+		}
+		base = obj
 	}
 
 	zr, err := zlib.NewReader(r.r)
@@ -161,48 +153,47 @@ func (r *Reader) Read() (obj object.Interface, err error) {
 	zr.Read(dummy[:])
 
 	if base != nil {
-		var d delta.Object
-		d, err = delta.Unmarshal(data)
+		objType = base.objType
+		data, err = applyDelta(base.data, data)
 		if err != nil {
 			return
 		}
-		obj, err = d.Apply(base)
-		if err != nil {
-			return
-		}
-	} else {
-		obj, err = object.New(objType)
-		if err != nil {
-			return
-		}
-		err = internal.UnmarshalObj(obj, data)
-		if err != nil {
-			return
-		}
+	}
+	obj, err = object.New(objType)
+	if err != nil {
+		return
+	}
+	err = unmarshalObj(obj, data)
+	if err != nil {
+		return
 	}
 
 	id, err := object.Hash(obj)
 	if err != nil {
 		return
 	}
-	r.ofs[pos] = obj
-	r.ref[id] = obj
+	base = &baseObj{objType, data}
+	r.ofs[pos] = base
+	r.ref[id] = base
 	r.n--
 	return
 }
 
 // Close reads and verifies the packfile SHA-1 footer from the stream.
 // It returns ErrChecksum if the checksum is not valid.  It does not
-// close the underlying reader.  This method should only be called when
+// close the underlying reader.  This method should only be called after
 // all objects have been read.
 func (r *Reader) Close() error {
-	var my, other [sha1.Size]byte
-	copy(my[:], r.r.Sum(nil))
-	_, err := io.ReadFull(r.r, other[:])
-	if err == nil && my != other {
-		err = ErrChecksum
+	var read, expected [sha1.Size]byte
+	copy(expected[:], r.r.Sum(nil))
+	_, err := io.ReadFull(r.r, read[:])
+	switch {
+	case err != nil:
+		return err
+	case read != expected:
+		return ErrChecksum
 	}
-	return err
+	return nil
 }
 
 // A Writer writes Git objects to a packfile stream.
@@ -215,16 +206,17 @@ type Writer struct {
 // that the packfile will contain.  NewWriter returns a non-nil error
 // if it fails to write the packfile header or if n is outside the range
 // of an unsigned 32-bit integer.  It is the caller's responsibility to
-// call Close on the Writer when all objects have been written.
+// call Close on the Writer after all objects have been written.
 func NewWriter(w io.Writer, n int64) (*Writer, error) {
 	if int64(uint32(n)) != n {
 		return nil, ErrTooManyObjects
 	}
-	pfw := new(Writer)
-	pfw.n = n
-	pfw.w = newDigestWriter(w, sha1.New())
+	dw := newDigestWriter(w, sha1.New())
 	h := header{signature, 3, uint32(n)}
-	return pfw, binary.Write(pfw.w, binary.BigEndian, h)
+	if err := binary.Write(dw, binary.BigEndian, h); err != nil {
+		return nil, err
+	}
+	return &Writer{dw, n}, nil
 }
 
 // Len returns the number of objects that still need to be written to
@@ -243,7 +235,7 @@ func (w *Writer) Write(obj object.Interface) error {
 	if w.n == 0 {
 		return ErrTooManyObjects
 	}
-	data, err := internal.MarshalObj(obj)
+	data, err := marshalObj(obj)
 	if err != nil {
 		return err
 	}
@@ -260,7 +252,7 @@ func (w *Writer) Write(obj object.Interface) error {
 }
 
 // Close writes the packfile SHA-1 footer to the stream.  It does not
-// close the underlying writer.  This method should only be called when
+// close the underlying writer.  This method should only be called after
 // all objects have been written.
 func (w *Writer) Close() error {
 	_, err := w.w.Write(w.w.Sum(nil))
