@@ -222,9 +222,10 @@ func (r *Reader) Close() error {
 
 // A Writer writes Git objects to a packfile stream.
 type Writer struct {
-	w  *digestWriter
-	zw *zlib.Writer
-	n  int64
+	w    *digestWriter
+	zw   *zlib.Writer
+	n    int64
+	prev [object.TypeReserved][]byte
 }
 
 // newZlibWriter resets the cached *zlib.Writer to write to ww and
@@ -248,7 +249,11 @@ func NewWriter(w io.Writer, n int64) (*Writer, error) {
 	if err := binary.Write(dw, binary.BigEndian, h); err != nil {
 		return nil, err
 	}
-	return &Writer{dw, zlib.NewWriter(nil), n}, nil
+	return &Writer{
+		w:  dw,
+		zw: zlib.NewWriter(nil),
+		n:  n,
+	}, nil
 }
 
 // Len returns the number of objects that still need to be written to
@@ -257,29 +262,64 @@ func (w *Writer) Len() int64 {
 	return w.n
 }
 
-// BUG(lor): Writer.WriteObject writes all its arguments as full
-// objects; it does not attempt to delta compress them.
+// BUG(lor): Thin packfiles and ofs-delta objects cannot be written.
+// Implementing them would require complicating the Writer interface
+// with protocol capability options.
 
 // WriteObject writes a Git object to the stream.  It returns
 // nil, ErrTooManyObjects if trying to write more objects than were
-// specified in the call to NewWriter.
+// specified in the call to NewWriter.  If the difference between an
+// object and the last object of the same type to have been written
+// takes less space than the object's binary representation, WriteObject
+// writes the object as a ref-delta.
 func (w *Writer) WriteObject(obj object.Interface) error {
+	// check if there are still objects to write
 	if w.n == 0 {
 		return ErrTooManyObjects
 	}
+
+	// marshal the object
 	data, err := marshalObj(obj)
 	if err != nil {
 		return err
 	}
-	err = writeObjHeader(w.w, object.TypeOf(obj), int64(len(data)))
+
+	// if the object's difference from the last one of the same
+	// type (if any) takes less space than the object's binary
+	// representation, write the object as a delta instead
+	objType := object.TypeOf(obj)
+	base := w.prev[objType]
+	w.prev[objType] = data
+	if base != nil {
+		delta := computeDelta(data, base)
+		if len(delta) < len(data) {
+			objType = refDelta
+			data = delta
+		}
+	}
+
+	// write object header
+	err = writeObjHeader(w.w, objType, int64(len(data)))
 	if err != nil {
 		return err
 	}
+
+	// if object is a delta, write the ID of its base object
+	if objType == refDelta {
+		id := hashObj(object.TypeOf(obj), base)
+		if _, err := w.w.Write(id[:]); err != nil {
+			return err
+		}
+	}
+
+	// write object body
 	z := w.newZlibWriter(w.w)
 	if _, err = z.Write(data); err != nil {
 		z.Close()
 		return err
 	}
+
+	// update bookkeeping information and return
 	w.n--
 	return z.Close()
 }
