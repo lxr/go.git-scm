@@ -47,18 +47,12 @@ func ReceivePack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	deleteCommandsOnly := true
 	var cmds []receiveCmd
 	var caps CapList
-	if err := pktr.Next(); err != nil {
-		return err
-	}
 	for {
 		var cmd receiveCmd
-		str, err := pktr.ReadMsgString()
-		if err == io.EOF {
+		if n, err := fmtLscanf(pktr, "%s %s %s\x00%s",
+			&cmd.oldID, &cmd.newID, &cmd.name, &caps); err == io.EOF {
 			break
-		} else if err != nil {
-			return err
-		} else if n, err := fmt.Sscanf(str, "%s %s %s\x00%s",
-			&cmd.oldID, &cmd.newID, &cmd.name, &caps); n < 3 {
+		} else if n < 3 {
 			return err
 		}
 		cmds = append(cmds, cmd)
@@ -82,17 +76,17 @@ func ReceivePack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	if err == nil {
 		// Rather sillily, "unpack ok" is expected to be sent
 		// event if no packfile was actually unpacked.
-		fmt.Fprintf(pktw, "unpack ok\n")
+		fmtLprintf(pktw, "unpack ok\n")
 	} else {
-		fmt.Fprintf(pktw, "unpack %s\n", err)
+		fmtLprintf(pktw, "unpack %s\n", err)
 	}
 
 	for _, c := range cmds {
 		if err := repository.UpdateRef(repo, string(c.name), c.oldID, c.newID); err != nil {
-			fmt.Fprintf(pktw, "ng %s %s\n", c.name, err)
+			fmtLprintf(pktw, "ng %s %s\n", c.name, err)
 			continue
 		}
-		fmt.Fprintf(pktw, "ok %s\n", c.name)
+		fmtLprintf(pktw, "ok %s\n", c.name)
 	}
 
 	pktw.Flush()

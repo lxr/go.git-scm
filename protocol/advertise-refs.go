@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/lxr/go.git-scm/object"
@@ -24,15 +23,15 @@ func AdvertiseRefs(repo repository.Interface, w io.Writer) error {
 	HEAD, _ := repo.GetHead("")
 	pktw := pktline.NewWriter(w)
 	if id, err := repo.GetRef(HEAD); err == nil {
-		fmt.Fprintf(pktw, "%s %s\x00%s\n", id, "HEAD", Capabilities)
+		fmtLprintf(pktw, "%s %s\x00%s\n", id, "HEAD", Capabilities)
 	} else if len(names) == 0 {
-		fmt.Fprintf(pktw, "%s %s\x00%s\n", object.ZeroID, "capabilities^{}", Capabilities)
+		fmtLprintf(pktw, "%s %s\x00%s\n", object.ZeroID, "capabilities^{}", Capabilities)
 	}
 	for i := range names {
 		name, id := names[i], ids[i]
-		fmt.Fprintf(pktw, "%s %s\n", id, name)
+		fmtLprintf(pktw, "%s %s\n", id, name)
 		if tag, _, err := repository.GetTag(repo, id); err == nil {
-			fmt.Fprintf(pktw, "%s %s^{}\n", tag.Object, name)
+			fmtLprintf(pktw, "%s %s^{}\n", tag.Object, name)
 		}
 	}
 	pktw.Flush()

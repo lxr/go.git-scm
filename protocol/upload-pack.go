@@ -19,17 +19,11 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	pktr := pktline.NewReader(r)
 	var want []object.ID
 	var caps CapList
-	if err := pktr.Next(); err != nil {
-		return err
-	}
 	for {
 		var id object.ID
-		str, err := pktr.ReadMsgString()
-		if err == io.EOF {
+		if n, err := fmtLscanf(pktr, "want %s %s", &id, &caps); err == io.EOF {
 			break
-		} else if err != nil {
-			return err
-		} else if n, err := fmt.Sscanf(str, "want %s %s", &id, &caps); n < 1 {
+		} else if n < 1 {
 			return err
 		}
 		want = append(want, id)
@@ -39,6 +33,7 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	}
 
 	pktw := pktline.NewWriter(w)
+	pktr.Next()
 	common, err := negotiate(repo, pktw, pktr, caps["multi_ack_detailed"])
 	switch {
 	case err == io.EOF:
@@ -70,27 +65,22 @@ func negotiate(repo repository.Interface, pktw *pktline.Writer, pktr *pktline.Re
 		id   object.ID
 		last object.ID
 	)
-	if err = pktr.Next(); err != nil {
-		return
-	}
 	for {
-		msg, err = pktr.ReadMsgString()
+		msg, err = pktr.ReadLine()
 		switch {
 		case err == io.EOF:
 			if len(common) == 0 || multiAck {
-				fmt.Fprintf(pktw, "NAK\n")
+				fmtLprintf(pktw, "NAK\n")
 			}
-			if err = pktr.Next(); err != nil {
-				return
-			}
+			pktr.Next()
 			continue
 		case err != nil:
 			return
 		case msg == "done\n":
 			if len(common) == 0 {
-				fmt.Fprintf(pktw, "NAK\n")
+				fmtLprintf(pktw, "NAK\n")
 			} else if multiAck {
-				fmt.Fprintf(pktw, "ACK %s\n", last)
+				fmtLprintf(pktw, "ACK %s\n", last)
 			}
 			return
 		}
@@ -105,9 +95,9 @@ func negotiate(repo repository.Interface, pktw *pktline.Writer, pktr *pktline.Re
 		}
 		if ok {
 			if multiAck {
-				fmt.Fprintf(pktw, "ACK %s common\n", id)
+				fmtLprintf(pktw, "ACK %s common\n", id)
 			} else if len(common) == 0 {
-				fmt.Fprintf(pktw, "ACK %s\n", id)
+				fmtLprintf(pktw, "ACK %s\n", id)
 			}
 			last = id
 			common = append(common, last)

@@ -42,7 +42,7 @@ func AdvertiseRefs(repo repository.Interface, w http.ResponseWriter, r *http.Req
 		return
 	}
 	pktw := pktline.NewWriter(w)
-	fmt.Fprintf(pktw, "# service=%s\n", service)
+	pktw.WriteLine(fmt.Sprintf("# service=%s\n", service))
 	pktw.Flush() // not mentioned in the docs, but required.
 	io.Copy(w, buf)
 }

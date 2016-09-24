@@ -5,117 +5,86 @@ package pktline
 
 import (
 	"errors"
-	"fmt"
 	"io"
 )
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	} else {
-		return b
-	}
-}
-
-func readBytes(r io.Reader, n int) ([]byte, error) {
-	p := make([]byte, n)
-	n, err := io.ReadFull(r, p)
-	return p[:n], err
-}
 
 // MaxPayloadLen is the maximum length of a pkt-line payload.
 const MaxPayloadLen = 65520
 
-// ErrTooLong is returned by Writer.Write if the payload length exceeds
-// MaxPayloadLen.
+// ErrTooLong is returned by Writer.WriteLine if the payload length
+// exceeds MaxPayloadLen.
 var ErrTooLong = errors.New("pkt-line too long")
 
+// readLineLen reads a pkt-line length from r.  The four bytes of the
+// length itself are subtracted from the returned value.
+func readLineLen(r io.Reader) (int, error) {
+	var p [4]byte
+	if _, err := io.ReadFull(r, p[:]); err != nil {
+		return 0, err
+	}
+	var x int
+	for i, c := range p {
+		switch c {
+		case 'A', 'B', 'C', 'D', 'E', 'F':
+			x |= int(c-'A'+10) << (uint(4-i-1) * 4)
+		case 'a', 'b', 'c', 'd', 'e', 'f':
+			x |= int(c-'a'+10) << (uint(4-i-1) * 4)
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			x |= int(c-'0') << (uint(4-i-1) * 4)
+		}
+	}
+	return x - 4, nil
+}
+
+// writeLineLen writes a pkt-line length x to w.  The four bytes of the
+// length itself are added to x.
+func writeLineLen(w io.Writer, x int) error {
+	hexDigits := []byte("0123456789abcdef")
+	x += 4
+	p := [4]byte{
+		hexDigits[x>>12&0xF],
+		hexDigits[x>>8&0xF],
+		hexDigits[x>>4&0xF],
+		hexDigits[x>>0&0xF],
+	}
+	_, err := w.Write(p[:])
+	return err
+}
+
 // A Reader reads pkt-line records from an underlying reader.
-// The method Next must be called to start reading the first pkt-line
-// substream.
 type Reader struct {
-	r    io.Reader
-	want int
+	r     io.Reader
+	atEOF bool
 }
 
 // NewReader creates a new Reader from r.
 func NewReader(r io.Reader) *Reader {
-	return &Reader{r, -1}
+	return &Reader{r, false}
 }
 
-// readLineLen reads the length of the next pkt-line in the stream and
-// stores it in r.want, substracting from it the four bytes of the
-// length itself.
-func (r *Reader) readLineLen() error {
-	_, err := fmt.Fscanf(r.r, "%04x", &r.want)
-	r.want -= 4
-	return err
+// Next advances the Reader past a flush-pkt.  It should only be called
+// after Read has returned io.EOF.
+func (r *Reader) Next() {
+	r.atEOF = false
 }
 
-// Len returns the number of bytes remaining on the current pkt-line.
-// Zero is returned only at the start of an empty pkt-line.  Len returns
-// a negative number at a flush-pkt.
-func (r *Reader) Len() int {
-	return r.want
-}
-
-// Next advances the reader to the next pkt-line substream (including
-// the first), skipping any remaining pkt-lines in the current
-// substream.  It returns io.EOF if at the end of the underlying reader.
-func (r *Reader) Next() error {
-	for r.want >= 0 {
-		if _, err := r.ReadMsg(); err != nil {
-			return err
-		}
+// ReadLine reads and returns the next pkt-line in the stream.
+// On error, it returns what was successfully read of the pkt-line.
+// This error is io.ErrUnexpectedEOF if an EOF is encountered in the
+// middle of a pkt-line.  ReadLine returns "", io.EOF at a flush-pkt
+// until Next is called.
+func (r *Reader) ReadLine() (string, error) {
+	n, err := readLineLen(r.r)
+	switch {
+	case err != nil:
+		return "", err
+	case n < 0: // flush-pkt
+		r.atEOF = true
+		return "", io.EOF
 	}
-	err := r.readLineLen()
-	if err == io.ErrUnexpectedEOF {
-		err = io.EOF
-	}
-	return err
-}
-
-// Read reads bytes from the pkt-line stream.  Reads are truncated at
-// pkt-line boundaries, so it is very likely for Read to return
-// n < len(p) with a nil error.  (A consequence of this is that an empty
-// pkt-line in a stream results in one read returning 0, nil.)  If a
-// read ends at a pkt-line boundary, whether naturally or through
-// truncation, Read prereads the length of the next pkt-line, and any
-// error in doing this is returned in err.  Read returns 0, io.EOF after
-// it encounters a flush-pkt until Next is called.
-func (r *Reader) Read(p []byte) (n int, err error) {
-	if r.want < 0 {
-		return 0, io.EOF
-	}
-	n = min(len(p), r.want)
-	n, err = io.ReadFull(r.r, p[:n])
-	r.want -= n
-	if r.want == 0 && err == nil {
-		err = r.readLineLen()
-	}
-	return n, err
-}
-
-// ReadMsg returns the remaining pkt-line as a byte slice.  An empty
-// slice is returned only at the start of an empty pkt-line.  ReadMsg
-// returns nil, io.EOF after it encounters a flush-pkt until Next is
-// called.  On error, ReadMsg returns whatever was read of the pkt-line.
-//
-// The name of this method is likely to change if an interface with
-// similar semantics is added to the Go standard library.
-func (r *Reader) ReadMsg() ([]byte, error) {
-	if n := r.Len(); n < 0 {
-		return nil, io.EOF
-	} else {
-		return readBytes(r, n)
-	}
-}
-
-// ReadMsgString behaves like ReadMsg, except it returns the pkt-line
-// as a string.
-func (r *Reader) ReadMsgString() (string, error) {
-	p, err := r.ReadMsg()
-	return string(p), err
+	p := make([]byte, n)
+	n, err = io.ReadFull(r.r, p)
+	return string(p[:n]), err
 }
 
 // A Writer writes pkt-line records to an underlying writer.
@@ -134,20 +103,15 @@ func (w *Writer) Flush() error {
 	return err
 }
 
-// Writer writes p as a single pkt-line record.  It returns
-// 0, ErrTooLong if len(p) exceeds MaxPayloadLen.
-func (w *Writer) Write(p []byte) (int, error) {
-	if len(p) > MaxPayloadLen {
-		return 0, ErrTooLong
+// WriteLine writes s as a single pkt-line record.  It returns
+// ErrTooLong if len(s) exceeds MaxPayloadLen.
+func (w *Writer) WriteLine(s string) error {
+	if len(s) > MaxPayloadLen {
+		return ErrTooLong
 	}
-	if _, err := fmt.Fprintf(w.w, "%04x", len(p)+4); err != nil {
-		return 0, err
+	if err := writeLineLen(w.w, len(s)); err != nil {
+		return err
 	}
-	return w.w.Write(p)
-}
-
-// WriteString writes s as a single pkt-line record.  It behaves like
-// Write.
-func (w *Writer) WriteString(s string) (int, error) {
-	return w.Write([]byte(s))
+	_, err := io.WriteString(w.w, s)
+	return err
 }
