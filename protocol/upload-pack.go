@@ -117,11 +117,10 @@ func writePack(w io.Writer, objs []object.Interface) error {
 	if err != nil {
 		return err
 	}
-	defer pfw.Close()
 	for _, obj := range objs {
 		if err := pfw.Write(obj); err != nil {
 			return err
 		}
 	}
-	return nil
+	return pfw.Close()
 }

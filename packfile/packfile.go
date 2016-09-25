@@ -214,7 +214,8 @@ type Writer struct {
 // NewWriter creates a new Writer from w.  n is the number of objects
 // that the packfile will contain.  NewWriter returns a non-nil error
 // if it fails to write the packfile header or if n is outside the range
-// of an unsigned 32-bit integer.
+// of an unsigned 32-bit integer.  It is the caller's responsibility to
+// call Close on the Writer when all objects have been written.
 func NewWriter(w io.Writer, n int64) (*Writer, error) {
 	if int64(uint32(n)) != n {
 		return nil, ErrTooManyObjects
@@ -259,7 +260,8 @@ func (w *Writer) Write(obj object.Interface) error {
 }
 
 // Close writes the packfile SHA-1 footer to the stream.  It does not
-// close the underlying writer.
+// close the underlying writer.  This method should only be called when
+// all objects have been written.
 func (w *Writer) Close() error {
 	_, err := w.w.Write(w.w.Sum(nil))
 	return err
