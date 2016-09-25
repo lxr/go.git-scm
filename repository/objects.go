@@ -148,22 +148,23 @@ func GetPath(r Interface, id object.ID, name string) (object.Interface, object.I
 // encountered during the traversal, Negotiate returns an
 // *object.TypeError containing it.
 func Negotiate(r Interface, want []object.ID, have []object.ID) ([]object.Interface, error) {
-	has := make(map[object.ID]object.Interface)
+	objm := make(map[object.ID]bool)
 	for _, id := range have {
-		has[id] = nil
+		objm[id] = true
 	}
-	nhave := len(has)
+	var objs []object.Interface
 	for len(want) > 0 {
 		var id object.ID
 		id, want = want[0], want[1:]
-		if _, ok := has[id]; ok {
+		if objm[id] {
 			continue
 		}
 		obj, err := r.GetObject(id)
 		if err != nil {
-			return nil, err
+			return objs, err
 		}
-		has[id] = obj
+		objs = append(objs, obj)
+		objm[id] = true
 		switch obj := obj.(type) {
 		case *object.Commit:
 			want = append(want, obj.Tree)
@@ -179,16 +180,8 @@ func Negotiate(r Interface, want []object.ID, have []object.ID) ([]object.Interf
 		case *object.Tag:
 			want = append(want, obj.Object)
 		default:
-			return nil, &object.TypeError{obj}
+			return objs, &object.TypeError{obj}
 		}
 	}
-	res := make([]object.Interface, len(has)-nhave)
-	i := 0
-	for _, obj := range has {
-		if obj != nil {
-			res[i] = obj
-			i++
-		}
-	}
-	return res, nil
+	return objs, nil
 }
