@@ -71,14 +71,12 @@ func (m TreeMode) Type() Type {
 // ascending in C locale, with the exception that the names of sub-trees
 // are sorted as if they had a trailing slash.
 func (t *Tree) Names() []string {
-	i := 0
-	names := make(sort.StringSlice, len(*t))
+	names := make(sort.StringSlice, 0, len(*t))
 	for name, ti := range *t {
-		names[i] = name
 		if ti.Mode == ModeTree {
-			names[i] += "/"
+			name += "/"
 		}
-		i++
+		names = append(names, name)
 	}
 	names.Sort()
 	for i, name := range names {
