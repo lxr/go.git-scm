@@ -1,5 +1,10 @@
 package object
 
+import (
+	"bytes"
+	"fmt"
+)
+
 // A Tag is a named label for another Git object, usually a Commit.
 type Tag struct {
 	Object  ID        // ID of the tagged object
@@ -26,9 +31,24 @@ func (t *Tag) UnmarshalBinary(data []byte) error {
 }
 
 func (t *Tag) MarshalText() ([]byte, error) {
-	return defaultMarshalText(t)
+	buf := new(bytes.Buffer)
+	fmt.Fprintln(buf, "object", t.Object)
+	fmt.Fprintln(buf, "type", t.Type)
+	fmt.Fprintln(buf, "tag", t.Tag)
+	fmt.Fprintln(buf, "tagger", t.Tagger)
+	fmt.Fprintln(buf)
+	buf.WriteString(t.Message)
+	return buf.Bytes(), nil
 }
 
 func (t *Tag) UnmarshalText(text []byte) error {
-	return defaultUnmarshalText(text, t)
+	buf := bytes.NewBuffer(text)
+	var err fmtErr
+	err.Check(fmt.Fscanf(buf, "object %s\n", &t.Object))
+	err.Check(fmt.Fscanf(buf, "type %s\n", &t.Type))
+	err.Check(fmt.Fscanf(buf, "tag %s\n", &t.Tag))
+	err.Check(fmt.Fscanf(buf, "tagger %s\n", &t.Tagger))
+	err.Check(fmt.Fscanf(buf, "\n"))
+	t.Message = buf.String()
+	return err.Err()
 }

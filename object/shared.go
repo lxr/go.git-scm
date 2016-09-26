@@ -3,9 +3,7 @@
 package object
 
 import (
-	"bytes"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 )
@@ -85,63 +83,20 @@ func (s *Signature) Scan(ss fmt.ScanState, verb rune) error {
 	return nil
 }
 
-// defaultMarshalText is the common function for serializing Commit and
-// Tag objects.  It uses reflection to read all fields of *v except the
-// last and print them with one field per line, with the lower-cased
-// field name and a space prefixed to the field value.  The contents of
-// the last field of *v are printed after a blank line.
-func defaultMarshalText(v interface{}) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	o := reflect.ValueOf(v).Elem()
-	t := o.Type()
-	n := t.NumField() - 1
-	for i := 0; i < n; i++ {
-		name := strings.ToLower(t.Field(i).Name)
-		v := o.Field(i)
-		switch v.Kind() {
-		case reflect.Slice:
-			for j := 0; j < v.Len(); j++ {
-				fmt.Fprintln(buf, name, v.Index(j).Interface())
-			}
-		default:
-			fmt.Fprintln(buf, name, v.Interface())
-		}
-	}
-	buf.WriteString("\n" + o.Field(n).String())
-	return buf.Bytes(), nil
+// A fmtErr can be used to cache errors from fmt function calls for
+// later inspection, while passing the byte/argument counts they return
+// through unmolested.
+type fmtErr struct {
+	err error
 }
 
-// defaultUnmarshalText is the common function for deserializing Commit
-// and Tag objects.  It reads lines of text from data and tries to
-// store them in the field of *v indicated by the first space-separated
-// word on the line.  Everything after the first blank line is stored
-// in *v's last field.
-func defaultUnmarshalText(data []byte, v interface{}) error {
-	o := reflect.ValueOf(v).Elem()
-	buf := bytes.NewBuffer(data)
-	for {
-		var name string
-		if _, err := fmt.Fscanf(buf, "%s ", &name); err != nil {
-			break
-		}
-		f := o.FieldByName(strings.Title(name))
-		if !f.IsValid() {
-			return fmt.Errorf("unknown field in Git object text: %s", name)
-		}
-		var err error
-		switch f.Kind() {
-		case reflect.Slice:
-			x := reflect.New(f.Type().Elem())
-			_, err = fmt.Fscanln(buf, x.Interface())
-			f.Set(reflect.Append(f, x.Elem()))
-		default:
-			_, err = fmt.Fscanln(buf, f.Addr().Interface())
-		}
-		if err != nil {
-			return err
-		}
+func (e *fmtErr) Check(n int, err error) int {
+	if e.err == nil {
+		e.err = err
 	}
-	f := o.Field(o.NumField() - 1)
-	f.SetString(buf.String())
-	return nil
+	return n
+}
+
+func (e *fmtErr) Err() error {
+	return e.err
 }
