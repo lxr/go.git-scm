@@ -41,7 +41,7 @@ func TypeOf(obj Interface) Type {
 	switch obj.(type) {
 	case *Commit:
 		return TypeCommit
-	case Tree:
+	case *Tree:
 		return TypeTree
 	case *Blob:
 		return TypeBlob
@@ -52,15 +52,16 @@ func TypeOf(obj Interface) Type {
 	}
 }
 
-// New returns a new Git object of the given type.  It returns a
-// TypeError containing the objType argument if it is not one of the
-// standard Git object types.  New never returns an error otherwise.
+// New returns a pointer to a newly allocated zero value of a Git object
+// of the given type.  It returns a TypeError containing the objType
+// argument if it is not one of the standard Git object types.  New
+// never returns an error otherwise.
 func New(objType Type) (Interface, error) {
 	switch objType {
 	case TypeCommit:
 		return new(Commit), nil
 	case TypeTree:
-		return make(Tree), nil
+		return new(Tree), nil
 	case TypeBlob:
 		return new(Blob), nil
 	case TypeTag:

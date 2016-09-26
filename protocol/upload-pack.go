@@ -120,9 +120,9 @@ func objectSizeOf(obj object.Interface) int {
 		n += 31 + len(obj.Committer.Name) + len(obj.Committer.Email)
 		n += 1 + len(obj.Message)
 		return n
-	case object.Tree:
+	case *object.Tree:
 		n := 0
-		for filename := range obj {
+		for filename := range *obj {
 			n += 28 + len(filename)
 		}
 		return n

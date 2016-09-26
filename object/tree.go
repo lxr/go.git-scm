@@ -24,6 +24,9 @@ func (f *filename) Scan(ss fmt.ScanState, verb rune) error {
 
 // A Tree is a mapping from filenames to tree metadata (most
 // importantly, object IDs), analogous to a filesystem directory.
+//
+// As a map type, remember that Tree must be initialized with make(Tree)
+// or a map literal before one can assign values to it.
 type Tree map[string]TreeInfo
 
 // A TreeInfo represents the metadata Git associates with a tree entry.
@@ -67,10 +70,10 @@ func (m TreeMode) Type() Type {
 // Names returns the names of the tree's entries in the Git order:
 // ascending in C locale, with the exception that the names of sub-trees
 // are sorted as if they had a trailing slash.
-func (t Tree) Names() []string {
+func (t *Tree) Names() []string {
 	i := 0
-	names := make(sort.StringSlice, len(t))
-	for name, ti := range t {
+	names := make(sort.StringSlice, len(*t))
+	for name, ti := range *t {
 		names[i] = name
 		if ti.Mode == ModeTree {
 			names[i] += "/"
@@ -84,20 +87,23 @@ func (t Tree) Names() []string {
 	return names
 }
 
-func (t Tree) MarshalBinary() ([]byte, error) {
+func (t *Tree) MarshalBinary() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	for _, name := range t.Names() {
-		ti := t[name]
+		ti := (*t)[name]
 		fmt.Fprintf(buf, "%o %s\x00", ti.Mode, name)
 		buf.Write(ti.Object[:])
 	}
 	return prependHeader(TypeTree, buf.Bytes())
 }
 
-func (t Tree) UnmarshalBinary(data []byte) error {
+func (t *Tree) UnmarshalBinary(data []byte) error {
 	data, err := stripHeader(TypeTree, data)
 	if err != nil {
 		return err
+	}
+	if *t == nil {
+		*t = make(Tree)
 	}
 	buf := bytes.NewBuffer(data)
 	for buf.Len() > 0 {
@@ -109,15 +115,15 @@ func (t Tree) UnmarshalBinary(data []byte) error {
 		if _, err := io.ReadFull(buf, ti.Object[:]); err != nil {
 			return err
 		}
-		t[string(name)] = ti
+		(*t)[string(name)] = ti
 	}
 	return nil
 }
 
-func (t Tree) MarshalText() ([]byte, error) {
+func (t *Tree) MarshalText() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	for _, name := range t.Names() {
-		ti := t[name]
+		ti := (*t)[name]
 		fmt.Fprintf(buf, "%06o %s %s\t%s\n",
 			ti.Mode,
 			ti.Mode.Type(),
@@ -128,7 +134,10 @@ func (t Tree) MarshalText() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (t Tree) UnmarshalText(text []byte) error {
+func (t *Tree) UnmarshalText(text []byte) error {
+	if *t == nil {
+		*t = make(Tree)
+	}
 	buf := bytes.NewBuffer(text)
 	for buf.Len() > 0 {
 		var ti TreeInfo
@@ -143,7 +152,7 @@ func (t Tree) UnmarshalText(text []byte) error {
 		if err != nil {
 			return err
 		}
-		t[string(name)] = ti
+		(*t)[string(name)] = ti
 	}
 	return nil
 }

@@ -212,9 +212,9 @@ func (c *Commit) Load(props []datastore.Property) (err error) {
 	return nil
 }
 
-func (t Tree) Save() ([]datastore.Property, error) {
+func (t *Tree) Save() ([]datastore.Property, error) {
 	var props []datastore.Property
-	for name, ti := range t {
+	for name, ti := range *t {
 		props = append(props, []datastore.Property{
 			{Name: "Name", Value: name, Multiple: true},
 			{Name: "Mode", Value: int64(ti.Mode), Multiple: true},
@@ -224,14 +224,17 @@ func (t Tree) Save() ([]datastore.Property, error) {
 	return props, nil
 }
 
-func (t Tree) Load(props []datastore.Property) (err error) {
+func (t *Tree) Load(props []datastore.Property) (err error) {
 	defer panicHandler(&err)
+	if *t == nil {
+		*t = make(Tree)
+	}
 	m := parseProps(props)
 	names, _ := m["Name"].([]interface{})
 	modes, _ := m["Mode"].([]interface{})
 	objects, _ := m["Object"].([]interface{})
 	for i, name := range names {
-		t[name.(string)] = TreeInfo{
+		(*t)[name.(string)] = TreeInfo{
 			Mode:   TreeMode(modes[i].(int64)),
 			Object: mustDecodeID(objects[i].(string)),
 		}

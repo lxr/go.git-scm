@@ -70,13 +70,13 @@ func GetTag(r Interface, id object.ID) (*object.Tag, object.ID, error) {
 // returns its ID.  If an object cannot be dereferenced into a tree,
 // GetTree returns its ID and an *object.TypeError containing the
 // object.
-func GetTree(r Interface, id object.ID) (object.Tree, object.ID, error) {
+func GetTree(r Interface, id object.ID) (*object.Tree, object.ID, error) {
 	obj, err := r.GetObject(id)
 	if err != nil {
 		return nil, id, err
 	}
 	switch obj := obj.(type) {
-	case object.Tree:
+	case *object.Tree:
 		return obj, id, nil
 	case *object.Commit:
 		return GetTree(r, obj.Tree)
@@ -113,7 +113,7 @@ func GetPath(r Interface, id object.ID, name string) (object.Interface, object.I
 	obj := object.Interface(tree)
 	for _, comp := range comps {
 		switch obj := obj.(type) {
-		case object.Tree:
+		case *object.Tree:
 			tree = obj
 		case *object.Commit:
 			tree, id, err = GetTree(r, obj.Tree)
@@ -128,7 +128,7 @@ func GetPath(r Interface, id object.ID, name string) (object.Interface, object.I
 		default:
 			return nil, id, &object.TypeError{obj}
 		}
-		ti, ok := tree[comp]
+		ti, ok := (*tree)[comp]
 		if !ok {
 			return tree, id, fmt.Errorf("no such tree entry: %s", comp)
 		}
@@ -171,8 +171,8 @@ func Negotiate(r Interface, want []object.ID, have []object.ID) ([]object.Interf
 			for _, parent := range obj.Parent {
 				want = append(want, parent)
 			}
-		case object.Tree:
-			for _, ti := range obj {
+		case *object.Tree:
+			for _, ti := range *obj {
 				want = append(want, ti.Object)
 			}
 		case *object.Blob:
