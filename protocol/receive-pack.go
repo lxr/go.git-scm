@@ -82,7 +82,7 @@ func ReceivePack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	}
 
 	for _, c := range cmds {
-		if err := repository.UpdateRef(repo, string(c.name), c.oldID, c.newID); err != nil {
+		if err := repo.UpdateRef(string(c.name), c.oldID, c.newID); err != nil {
 			fmtLprintf(pktw, "ng %s %s\n", c.name, err)
 			continue
 		}

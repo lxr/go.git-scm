@@ -1,6 +1,5 @@
-// Package repository defines a common interface for Git repositories.
-// It also defines a number of convenience functions for querying and
-// manipulating types that implement the interface.
+// Package repository defines a common interface for Git repositories
+// and a set of convenience functions for manipulating them.
 package repository
 
 import (
@@ -9,73 +8,62 @@ import (
 	"github.com/lxr/go.git-scm/object"
 )
 
-// ErrNotExist is returned when the named object, ref or head does not
+// ErrNotExist is returned when the named object or ref does not
 // exist.
-var ErrNotExist = errors.New("repository: item does not exist")
+var ErrNotExist = errors.New("repository: object does not exist")
 
-// ErrInvalidRef is returned when a refname parameter is not
+// ErrInvalidRef is returned when a refname argument is not
 // well-formed.
 var ErrInvalidRef = errors.New("repository: invalid refname")
 
-// Interface defines the interface to a Git repository.  A Git
-// repository is a database storing three types of items:
+// Interface defines the interface of a Git repository.  A Git
+// repository is a database storing three types of objects:
 //
-//  - Git objects (commits, blobs, trees and tags),
-//  - refs (references to Git objects, usually commits or tags), and
-//  - heads (references to "active" refs, which must be dereferencable
-//    to commits; more commonly known as symbolic refs).
+//  - Git objects (commits, blobs, trees and tags), which form an
+//    immutable graph structure through embedded links,
+//  - refs, which represent entry points to this graph, and
+//  - HEAD, a special singleton pointing to the "current" ref.
 //
-// A Git object is identified by its ID, a ref by its name, and a head
-// by the name of the remote repository it is the HEAD of.  The head of
-// the local repository is identified by the empty string.
-//
-// The interface defines separate sets of getter/setter methods for each
-// of these types.  The Get and Del methods return ErrNotExist if
-// the item does not exist.
+// Git objects are identified by their IDs and refs by their names.
 type Interface interface {
-	// Init performs whatever backend-specific work there is to
-	// make a newly created repository usable.  Usually this
-	// involves at least pointing the repository head to
-	// refs/heads/master.
-	Init() error
-	// TODO(lor): The Interface.Init method rather confuses the
-	// interface.  Implementors should be required to provide a
-	// CreateRepository method or the like.
+	// BUG(lor): Pseudo- and symbolic refs, commit hooks etc. are
+	// beyond the scope of Interface.  It supports only the bare
+	// minimum functionality necessary for exchanging repository
+	// data.
 
-	// The object methods.  PutObject may return err = nil in the
-	// (vanishingly unlikely) case that a different object with the
-	// same ID already exists.
+	// GetObject returns the object with the given ID.
 	GetObject(id object.ID) (object.Interface, error)
+
+	// PutObject stores the given object in the repository and
+	// calculates and returns its ID.  Storing the same object
+	// multiple times is idempotent.  Behavior is undefined if a
+	// different object that hashes to the same ID is stored;
+	// implementations may document their own behavior.
 	PutObject(obj object.Interface) (object.ID, error)
-	DelObject(id object.ID) error
 
-	// The ref methods.  It is the user's responsibility to ensure
-	// that the refnames passed to these methods are well-formed,
-	// though implementations must return ErrInvalidRef rather than
-	// panic on an ill-formed ref.  These methods do not resolve
-	// symbolic refs.
+	// GetRef returns the ID of the object the named ref points to.
 	GetRef(name string) (object.ID, error)
-	SetRef(name string, id object.ID) error
-	DelRef(name string) error
 
-	// ListRefs lists all refs in the repository whose names begin
-	// with the given prefix in ascending order by C locale.  The
-	// prefix is a sequence of slash-separated path components;
-	// it must not have a leading or trailing slash.  The listing
-	// does not include symbolic refs, in particular the symbolic
-	// ref HEAD.
-	ListRefs(prefix string) ([]string, []object.ID, error)
+	// UpdateRef atomically changes the named ref to point from
+	// oldID to newID.  It is an error if either the ref does
+	// not point at oldID at the time of the call, or the object
+	// named by newID does not exist in the repository.  The
+	// function is special-cased when either oldID or newID is zero:
+	//
+	//  - if oldID is zero, the ref is created if it does not
+	//    exist;
+	//  - if newID is zero, the ref is deleted if it exists;
+	//  - if both newID and oldID are zero, UpdateRef confirms that
+	//    the named ref does not exist in the repository.
+	UpdateRef(name string, oldID, newID object.ID) error
 
-	// BUG(lor): The definition of Interface.ListRefs makes a
-	// bit-perfect reimplementation of the "git show-ref" command
-	// troublesome, as it includes remote heads, which ARE symbolic
-	// refs.  I believe this is unintended behavior, however, since
-	// symrefs were never intended to be a similar "class" of
-	// entities to normal refs (inferred from
-	// http://permalink.gmane.org/gmane.comp.version-control.git/166812).
+	// ListRefs lists all refs in the repository in ascending order
+	// by C locale.
+	ListRefs() ([]string, []object.ID, error)
 
-	// The head methods.
-	GetHead(name string) (string, error)
-	SetHead(name string, target string) error
-	DelHead(name string) error
+	// GetHEAD returns the name of the ref the HEAD points to.
+	GetHEAD() (string, error)
+
+	// SetHEAD sets HEAD to point to the named ref.
+	SetHEAD(name string) error
 }

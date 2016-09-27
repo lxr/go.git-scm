@@ -19,30 +19,35 @@ func mapErr(err error) error {
 	return err
 }
 
+// InitRepository initializes a new Git repository structure in the App
+// Engine datastore using the given context and rooted at the given key.
+// The prefix string is used to "namespace" entity kinds and memcache
+// accesses by prepending it to kind names and memcache keys.
+func InitRepository(ctx context.Context, root *datastore.Key, prefix string) (repository.Interface, error) {
+	r := &repo{
+		ctx:    ctx,
+		root:   root,
+		prefix: prefix,
+	}
+	return r, r.SetHEAD("refs/heads/master")
+}
+
 // OpenRepository returns a Git repository interface to the App Engine
-// datastore using the given context and rooted at the given key.
-// The prefix string is used to "namespace" any memcache accesses by
-// prepending it to all memcache keys.
+// datastore using the given context and rooted at the given key.  The
+// prefix string is used to "namespace" entity kinds and memcache
+// accesses by prepending it to kind names and memcache keys.
 func OpenRepository(ctx context.Context, root *datastore.Key, prefix string) repository.Interface {
 	return &repo{
-		ctx:     ctx,
-		objects: datastore.NewKey(ctx, "category", "objects", 0, root),
-		refs:    datastore.NewKey(ctx, "category", "refs", 0, root),
-		head:    datastore.NewKey(ctx, "head", "HEAD", 0, root),
-		prefix:  prefix,
+		ctx:    ctx,
+		root:   root,
+		prefix: prefix,
 	}
 }
 
 type repo struct {
-	ctx     context.Context
-	objects *datastore.Key
-	refs    *datastore.Key
-	head    *datastore.Key
-	prefix  string
-}
-
-func (r *repo) Init() error {
-	return r.SetHead("", "refs/heads/master")
+	ctx    context.Context
+	root   *datastore.Key
+	prefix string
 }
 
 func (r *repo) memkey(key *datastore.Key) string {

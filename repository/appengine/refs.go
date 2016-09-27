@@ -1,8 +1,9 @@
 package appengine
 
 import (
-	"strings"
+	"errors"
 
+	"golang.org/x/net/context"
 	"google.golang.org/appengine/datastore"
 
 	"github.com/lxr/go.git-scm/object"
@@ -10,18 +11,10 @@ import (
 )
 
 func (r *repo) refKey(name string) (*datastore.Key, error) {
-	comps := strings.Split(name, "/")
-	if comps[0] != "refs" {
+	if !repository.IsValidRef(name) {
 		return nil, repository.ErrInvalidRef
 	}
-	key := r.refs
-	for _, comp := range comps[1:] {
-		if comp == "" {
-			return nil, repository.ErrInvalidRef
-		}
-		key = datastore.NewKey(r.ctx, "ref", comp, 0, key)
-	}
-	return key, nil
+	return datastore.NewKey(r.ctx, r.prefix+"ref", name, 0, r.root), nil
 }
 
 func (r *repo) GetRef(name string) (object.ID, error) {
@@ -33,30 +26,45 @@ func (r *repo) GetRef(name string) (object.ID, error) {
 	return id, r.get(key, &id)
 }
 
-func (r *repo) SetRef(name string, id object.ID) error {
-	key, err := r.refKey(name)
-	if err != nil {
-		return err
-	}
-	return r.put(key, &id)
+func (r *repo) UpdateRef(name string, oldID, newID object.ID) error {
+	key, _ := r.refKey(name)
+	return datastore.RunInTransaction(r.ctx, func(tc context.Context) error {
+		var id object.ID
+		tr := *r
+		tr.ctx = tc
+		err := tr.get(key, &id)
+		if oldID != object.ZeroID {
+			if err != nil {
+				return err
+			}
+			if id != oldID {
+				return errors.New("repository/appengine: ref old value not what expected")
+			}
+		} else {
+			if err != repository.ErrNotExist {
+				if err == nil {
+					return errors.New("repository/appengine: ref exists")
+				}
+				return err
+			}
+		}
+		if newID != object.ZeroID {
+			if _, err := r.GetObject(newID); err != nil {
+				return err
+			}
+			return tr.put(key, &newID)
+		} else if oldID != object.ZeroID {
+			return tr.del(key)
+		} else {
+			return nil
+		}
+	}, &datastore.TransactionOptions{Attempts: 0})
 }
 
-func (r *repo) DelRef(name string) error {
-	key, err := r.refKey(name)
-	if err != nil {
-		return err
-	}
-	return r.del(key)
-}
-
-func (r *repo) ListRefs(prefix string) ([]string, []object.ID, error) {
-	key, err := r.refKey(prefix)
-	if err != nil {
-		return nil, nil, err
-	}
+func (r *repo) ListRefs() ([]string, []object.ID, error) {
 	var ids []object.ID
-	keys, err := datastore.NewQuery("ref").
-		Ancestor(key).
+	keys, err := datastore.NewQuery(r.prefix+"ref").
+		Ancestor(r.root).
 		Order("__key__").
 		GetAll(r.ctx, &ids)
 	if err != nil {
@@ -64,11 +72,7 @@ func (r *repo) ListRefs(prefix string) ([]string, []object.ID, error) {
 	}
 	names := make([]string, len(keys))
 	for i, key := range keys {
-		for !r.refs.Equal(key) {
-			names[i] = "/" + key.StringID() + names[i]
-			key = key.Parent()
-		}
-		names[i] = "refs" + names[i]
+		names[i] = key.StringID()
 	}
 	return names, ids, nil
 }

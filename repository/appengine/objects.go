@@ -13,11 +13,10 @@ func (r *repo) GetObject(id object.ID) (object.Interface, error) {
 		return obj, err
 	}
 	obj, err := r.getObject(id)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		r.putObjectMemcache(id, obj)
 	}
-	r.putObjectMemcache(id, obj)
-	return obj, nil
+	return obj, err
 }
 
 func (r *repo) PutObject(obj object.Interface) (object.ID, error) {
@@ -28,13 +27,8 @@ func (r *repo) PutObject(obj object.Interface) (object.ID, error) {
 	return id, err
 }
 
-func (r *repo) DelObject(id object.ID) error {
-	r.delObjectMemcache(id)
-	return r.delObject(id)
-}
-
 func (r *repo) objKey(objType object.Type, id object.ID) *datastore.Key {
-	return datastore.NewKey(r.ctx, objType.String(), id.String(), 0, r.objects)
+	return datastore.NewKey(r.ctx, r.prefix+objType.String(), id.String(), 0, nil)
 }
 
 func (r *repo) getObject(id object.ID) (object.Interface, error) {
@@ -62,21 +56,6 @@ func (r *repo) putObject(obj object.Interface) (object.ID, error) {
 	return id, err
 }
 
-func (r *repo) delObject(id object.ID) error {
-	for t := object.TypeCommit; t < object.TypeReserved; t++ {
-		err := datastore.Delete(r.ctx, r.objKey(t, id))
-		switch err {
-		case nil:
-			return nil
-		case datastore.ErrNoSuchEntity:
-			// try the next object type
-		default:
-			return err
-		}
-	}
-	return repository.ErrNotExist
-}
-
 func (r *repo) objKeyMemcache(id object.ID) string {
 	return r.prefix + id.String()
 }
@@ -98,8 +77,4 @@ func (r *repo) putObjectMemcache(id object.ID, obj object.Interface) error {
 		Key:   r.objKeyMemcache(id),
 		Value: data,
 	})
-}
-
-func (r *repo) delObjectMemcache(id object.ID) error {
-	return memcache.Delete(r.ctx, r.objKeyMemcache(id))
 }

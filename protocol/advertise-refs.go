@@ -16,11 +16,11 @@ import (
 // could not list the references; in particular errors writing to w or
 // peeling annotated tags are ignored.
 func AdvertiseRefs(repo repository.Interface, w io.Writer) error {
-	names, ids, err := repo.ListRefs("refs")
+	names, ids, err := repo.ListRefs()
 	if err != nil {
 		return err
 	}
-	HEAD, _ := repo.GetHead("")
+	HEAD, _ := repo.GetHEAD()
 	pktw := pktline.NewWriter(w)
 	if id, err := repo.GetRef(HEAD); err == nil {
 		fmtLprintf(pktw, "%s %s\x00%s\n", id, "HEAD", Capabilities)

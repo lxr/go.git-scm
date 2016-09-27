@@ -4,43 +4,33 @@ import (
 	"google.golang.org/appengine/datastore"
 )
 
-type symref string
+type head string
 
-func (s *symref) Save() ([]datastore.Property, error) {
+func (h *head) Save() ([]datastore.Property, error) {
 	return []datastore.Property{
-		{Name: "Target", Value: string(*s)},
+		{Name: "HEAD", Value: string(*h)},
 	}, nil
 }
 
-func (s *symref) Load(props []datastore.Property) error {
-	if len(props) != 1 || props[0].Name != "Target" {
+func (h *head) Load(props []datastore.Property) error {
+	if len(props) != 1 || props[0].Name != "HEAD" {
 		return datastore.ErrInvalidEntityType
 	}
 	target, ok := props[0].Value.(string)
 	if !ok {
 		return datastore.ErrInvalidEntityType
 	}
-	*s = symref(target)
+	*h = head(target)
 	return nil
 }
 
-func (r *repo) headKey(name string) *datastore.Key {
-	if name == "" {
-		return r.head
-	}
-	return datastore.NewKey(r.ctx, "head", name, 0, r.head)
+func (r *repo) GetHEAD() (string, error) {
+	var head head
+	err := r.get(r.root, &head)
+	return string(head), err
 }
 
-func (r *repo) GetHead(name string) (string, error) {
-	var target symref
-	return string(target), r.get(r.headKey(name), &target)
-}
-
-func (r *repo) SetHead(name string, target string) error {
-	s := symref(target)
-	return r.put(r.headKey(name), &s)
-}
-
-func (r *repo) DelHead(name string) error {
-	return r.del(r.headKey(name))
+func (r *repo) SetHEAD(name string) error {
+	s := head(name)
+	return r.put(r.root, &s)
 }
