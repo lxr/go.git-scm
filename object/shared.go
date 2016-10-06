@@ -3,6 +3,7 @@
 package object
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -99,4 +100,40 @@ func (e *fmtErr) Check(n int, err error) int {
 
 func (e *fmtErr) Err() error {
 	return e.err
+}
+
+// prependHeader prepends a Git object header to an object's binary
+// representation.  It returns a TypeError containing the objType
+// argument if it is not one of the standard Git ones.
+func prependHeader(objType Type, data []byte) ([]byte, error) {
+	if objType.String() == "" {
+		return nil, &TypeError{objType}
+	}
+	header := []byte(fmt.Sprintf("%s %d\x00", objType, len(data)))
+	return append(header, data...), nil
+}
+
+// stripHeader strips the Git object header from an object's binary
+// representation and validates the type and length recorded in it.
+// It returns the remaining data in the representation.  It returns a
+// TypeError containing the objType argument if it is not one of the
+// standard Git ones.
+func stripHeader(objType Type, data []byte) ([]byte, error) {
+	if objType.String() == "" {
+		return nil, &TypeError{objType}
+	}
+	buf := bytes.NewBuffer(data)
+	var bufType Type
+	var length int
+	_, err := fmt.Fscanf(buf, "%s %d\x00", &bufType, &length)
+	switch {
+	case err != nil:
+		return nil, err
+	case bufType != objType:
+		return nil, fmt.Errorf("object: expected type %s, got %s", objType, bufType)
+	case length != buf.Len():
+		return nil, fmt.Errorf("object: expected length %d, got %d", length, buf.Len())
+	default:
+		return buf.Bytes(), err
+	}
 }

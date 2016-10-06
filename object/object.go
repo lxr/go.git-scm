@@ -2,6 +2,7 @@
 package object
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding"
 	"encoding/hex"
@@ -53,6 +54,50 @@ type Interface interface {
 // instance, json.Marshal tries MarshalText before using reflection,
 // which probably isn't what you want if you want to serialize Git
 // objects in JSON.
+
+// New returns a pointer to a newly allocated zero value of a Git object
+// of the given type.  It returns a TypeError containing the objType
+// argument if it is not one of the standard Git object types.  New
+// never returns an error otherwise.
+func New(objType Type) (Interface, error) {
+	switch objType {
+	case TypeCommit:
+		return new(Commit), nil
+	case TypeTree:
+		return new(Tree), nil
+	case TypeBlob:
+		return new(Blob), nil
+	case TypeTag:
+		return new(Tag), nil
+	default:
+		return nil, &TypeError{objType}
+	}
+}
+
+// Marshal returns the canonical binary representation of the given
+// object.  It returns a TypeError containing obj if it is not one of
+// the standard Git objects.
+func Marshal(obj Interface) ([]byte, error) {
+	if TypeOf(obj) == TypeUnknown {
+		return nil, &TypeError{obj}
+	}
+	return obj.MarshalBinary()
+}
+
+// Unmarshal decodes a Git object from its canonical binary
+// representation.  If the type recorded in the Git object header does
+// not match one of the standard Git ones, it is returned as a string
+// inside a TypeError.
+func Unmarshal(data []byte) (Interface, error) {
+	r := bytes.NewReader(data)
+	var objType Type
+	var length int
+	if _, err := fmt.Fscanf(r, "%s %d\x00", &objType, &length); err != nil {
+		return nil, err
+	}
+	obj, _ := New(objType)
+	return obj, obj.UnmarshalBinary(data)
+}
 
 // An ID is the name of a Git object.
 type ID [sha1.Size]byte
