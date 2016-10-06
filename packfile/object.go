@@ -45,7 +45,7 @@ func writeObjHeader(w io.Writer, objType object.Type, size int64) error {
 }
 
 func marshalObj(obj object.Interface) ([]byte, error) {
-	data, err := object.Marshal(obj)
+	data, _, err := object.Marshal(obj)
 	if err != nil {
 		return nil, err
 	}

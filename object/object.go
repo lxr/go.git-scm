@@ -74,14 +74,15 @@ func New(objType Type) (Interface, error) {
 	}
 }
 
-// Marshal returns the canonical binary representation of the given
-// object.  It returns a TypeError containing obj if it is not one of
-// the standard Git objects.
-func Marshal(obj Interface) ([]byte, error) {
+// Marshal returns the canonical binary representation and the ID of the
+// given object.  It returns a TypeError containing obj if it is not one
+// of the standard Git objects.
+func Marshal(obj Interface) ([]byte, ID, error) {
 	if TypeOf(obj) == TypeUnknown {
-		return nil, &TypeError{obj}
+		return nil, ZeroID, &TypeError{obj}
 	}
-	return obj.MarshalBinary()
+	data, err := obj.MarshalBinary()
+	return data, ID(sha1.Sum(data)), err
 }
 
 // Unmarshal decodes a Git object from its canonical binary
@@ -108,11 +109,8 @@ var ZeroID ID
 // Hash computes the ID of a Git object.  It returns a TypeError
 // containing obj if it is not one of the standard Git objects.
 func Hash(obj Interface) (ID, error) {
-	data, err := Marshal(obj)
-	if err != nil {
-		return ZeroID, err
-	}
-	return ID(sha1.Sum(data)), nil
+	_, id, err := Marshal(obj)
+	return id, err
 }
 
 // DecodeID parses a 40-character hexadecimal string as a Git ID.
