@@ -83,8 +83,8 @@ func mapErr(err error) error {
 // without an entity group).  The name of an object's key is the
 // hexadecimal representation of its ID.
 //
-// InitRepository does not clear already initialized repos; it merely
-// sets the HEAD to point to refs/heads/master.
+// Re-initializing an already initialized repository does not clear it;
+// it merely re-points its HEAD to refs/heads/master.
 func InitRepository(ctx context.Context, root *datastore.Key, prefix string) (repository.Interface, error) {
 	r := &repo{
 		ctx:    ctx,
@@ -98,6 +98,9 @@ func InitRepository(ctx context.Context, root *datastore.Key, prefix string) (re
 // datastore using the given parameters.  Refer to the documentation for
 // the InitRepository function to see how they control access to the
 // repository.
+//
+// The behavior of the returned repository.Interface is undefined if the
+// root key and prefix do not indicate an initialized repository.
 func OpenRepository(ctx context.Context, root *datastore.Key, prefix string) repository.Interface {
 	return &repo{
 		ctx:    ctx,
