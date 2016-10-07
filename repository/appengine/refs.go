@@ -23,7 +23,8 @@ func (r *repo) GetRef(name string) (object.ID, error) {
 	if err != nil {
 		return id, err
 	}
-	return id, r.get(key, &id)
+	err = r.get(key, &id)
+	return id, err
 }
 
 func (r *repo) UpdateRef(name string, oldID, newID object.ID) error {
