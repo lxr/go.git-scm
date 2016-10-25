@@ -20,6 +20,9 @@ var ErrTooLong = errors.New("pkt-line too long")
 func readLineLen(r io.Reader) (int, error) {
 	var p [4]byte
 	if _, err := io.ReadFull(r, p[:]); err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
 		return 0, err
 	}
 	var x int
@@ -72,7 +75,9 @@ func (r *Reader) Next() {
 // On error, it returns what was successfully read of the pkt-line.
 // This error is io.ErrUnexpectedEOF if an EOF is encountered in the
 // middle of a pkt-line.  ReadLine returns "", io.EOF at a flush-pkt
-// until Next is called.
+// until Next is called.  A return of "", io.ErrUnexpectedEOF
+// immediately after Next should be interpreted as the end of the
+// underlying stream.
 func (r *Reader) ReadLine() (string, error) {
 	n, err := readLineLen(r.r)
 	switch {
@@ -84,6 +89,14 @@ func (r *Reader) ReadLine() (string, error) {
 	}
 	p := make([]byte, n)
 	n, err = io.ReadFull(r.r, p)
+	// BUG(lor): Reader.ReadLine can return "", io.ErrUnexpectedEOF
+	// if the stream ends immediately after a non-zero pkt-line
+	// length or in the middle of one, so despite what the docs
+	// suggest, such a return immediately after Next does not
+	// necessarily signify a clean end of file.
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
 	return string(p[:n]), err
 }
 
