@@ -29,6 +29,9 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 		}
 		want = append(want, id)
 	}
+	if len(want) == 0 {
+		return nil
+	}
 	if d := caps.diff(Capabilities); len(d) > 0 {
 		return fmt.Errorf("unrecognized capabilities: %s", d)
 	}
@@ -69,12 +72,15 @@ func negotiate(repo repository.Interface, pktw *pktline.Writer, pktr *pktline.Re
 	for {
 		msg, err = pktr.ReadLine()
 		switch {
-		case err == io.EOF:
-			if len(common) == 0 || multiAck {
+		case err == io.EOF: // flush-pkt
+			if multiAck || len(common) == 0 {
 				fmtLprintf(pktw, "NAK\n")
 			}
 			pktr.Next()
 			continue
+		case err == io.ErrUnexpectedEOF && msg == "": // end of stream
+			err = io.EOF
+			return
 		case err != nil:
 			return
 		case msg == "done\n":

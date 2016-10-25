@@ -8,10 +8,10 @@ import (
 // Capabilities is the set of protocol capabilities supported by this
 // implementation.
 var Capabilities = CapList{
-	"report-status":      true,
 	"delete-refs":        true,
-	"ofs-delta":          true,
 	"multi_ack_detailed": true,
+	"ofs-delta":          true,
+	"report-status":      true,
 }
 
 // A CapList represents a set of Git protocol capabilities.
