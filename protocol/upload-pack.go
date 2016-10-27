@@ -50,7 +50,14 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 		return err
 	}
 
-	objs, err := repository.Negotiate(repo, want, common)
+	var objs []object.Interface
+	err = repository.Walk(repo, want, common, func(id object.ID, obj object.Interface, err error) error {
+		if err != nil {
+			return err
+		}
+		objs = append(objs, obj)
+		return nil
+	})
 	if err != nil {
 		return err
 	}

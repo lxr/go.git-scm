@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -140,48 +141,66 @@ func GetPath(r Interface, id object.ID, name string) (object.Interface, object.I
 	return obj, id, nil
 }
 
-// Negotiate performs a breadth-first traversal of the repository
-// starting from the wanted objects and ending at the had objects (or
-// Git blobs, which reference no other objects).  It returns a slice
-// of all the traversed objects.  The slice contains all objects in
-// want but none of the ones in have.  If a non-standard Git object is
-// encountered during the traversal, Negotiate returns an
-// *object.TypeError containing it.
-func Negotiate(r Interface, want []object.ID, have []object.ID) ([]object.Interface, error) {
-	objm := make(map[object.ID]bool)
-	for _, id := range have {
-		objm[id] = true
+// SkipObject is a special value used by WalkFunc to indicate that the
+// repository walk should skip the subgraph rooted at the object.
+var SkipObject = errors.New("skip this object")
+
+// WalkFunc is the callback function type for Walk.  It takes as its
+// arguments the object's ID and contents and any possible error in
+// retrieving the object from the repository.  If err is non-nil, obj
+// is undefined, and the WalkFunc should return either SkipObject or a
+// non-nil error.
+type WalkFunc func(id object.ID, obj object.Interface, err error) error
+
+// Walk walks the repository graph from the start objects (inclusive)
+// to the end objects (exclusive), calling walkFn once for each
+// encountered object.  Walk ends at and returns the first non-nil error
+// returned by walkFn, unless the error is SkipObject, in which case
+// Walk continues without searching the subgraph rooted at the current
+// object.
+//
+// Walk traverses the repository in depth-first order.  Non-standard Git
+// objects are treated as having no references for the purposes of the
+// traversal; they are still passed to walkFn.
+func Walk(r Interface, start, end []object.ID, walkFn WalkFunc) error {
+	visited := make(map[object.ID]bool)
+	for _, id := range end {
+		visited[id] = true
 	}
-	var objs []object.Interface
-	for len(want) > 0 {
+	pending := make([]object.ID, len(start))
+	copy(pending, start)
+	for len(pending) > 0 {
 		var id object.ID
-		id, want = want[0], want[1:]
-		if objm[id] {
+		n := len(pending) - 1
+		id, pending = pending[n], pending[:n]
+		if visited[id] {
 			continue
 		}
+		visited[id] = true
+
 		obj, err := r.GetObject(id)
-		if err != nil {
-			return objs, err
+		err = walkFn(id, obj, err)
+		if err == SkipObject {
+			continue
+		} else if err != nil {
+			return err
 		}
-		objs = append(objs, obj)
-		objm[id] = true
+
 		switch obj := obj.(type) {
 		case *object.Commit:
-			want = append(want, obj.Tree)
+			pending = append(pending, obj.Tree)
 			for _, parent := range obj.Parent {
-				want = append(want, parent)
+				pending = append(pending, parent)
 			}
 		case *object.Tree:
 			for _, ti := range *obj {
-				want = append(want, ti.Object)
+				pending = append(pending, ti.Object)
 			}
 		case *object.Blob:
 			// a blob holds no references
 		case *object.Tag:
-			want = append(want, obj.Object)
-		default:
-			return objs, &object.TypeError{obj}
+			pending = append(pending, obj.Object)
 		}
 	}
-	return objs, nil
+	return nil
 }
