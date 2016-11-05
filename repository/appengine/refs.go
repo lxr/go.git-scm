@@ -38,31 +38,30 @@ func (r *repo) UpdateRef(name string, oldID, newID object.ID) error {
 		var id object.ID
 		tr := *r
 		tr.ctx = tc
-		err := tr.get(key, &id)
-		if oldID != object.ZeroID {
-			if err != nil {
-				return err
-			}
-			if id != oldID {
+		if err := tr.get(key, &id); err != nil && err != datastore.ErrNoSuchEntity {
+			return err
+		}
+		if id != oldID {
+			switch object.ZeroID {
+			case id:
+				return repository.ErrRefNotExist
+			case oldID:
+				return repository.ErrRefExist
+			default:
 				return repository.ErrRefMismatch
 			}
-		} else {
-			if err != datastore.ErrNoSuchEntity {
-				if err == nil {
-					return repository.ErrRefExist
-				}
-				return err
-			}
 		}
-		if newID != object.ZeroID {
+		switch newID {
+		case object.ZeroID:
+			if oldID == object.ZeroID {
+				return nil
+			}
+			return mapRefErr(tr.del(key))
+		default:
 			if _, err := r.GetObject(newID); err != nil {
 				return err
 			}
 			return tr.put(key, &newID)
-		} else if oldID != object.ZeroID {
-			return mapRefErr(tr.del(key))
-		} else {
-			return nil
 		}
 	}, &datastore.TransactionOptions{Attempts: 0})
 }
