@@ -48,5 +48,5 @@ func FindRef(r Interface, name string) (object.ID, error) {
 			return id, err
 		}
 	}
-	return object.ZeroID, ErrNotExist
+	return object.ZeroID, ErrRefNotExist
 }

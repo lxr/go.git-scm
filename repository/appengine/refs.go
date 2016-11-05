@@ -1,14 +1,19 @@
 package appengine
 
 import (
-	"errors"
-
 	"golang.org/x/net/context"
 	"google.golang.org/appengine/datastore"
 
 	"github.com/lxr/go.git-scm/object"
 	"github.com/lxr/go.git-scm/repository"
 )
+
+func mapRefErr(err error) error {
+	if err == datastore.ErrNoSuchEntity {
+		return repository.ErrRefNotExist
+	}
+	return err
+}
 
 func (r *repo) refKey(name string) (*datastore.Key, error) {
 	if !repository.IsValidRef(name) {
@@ -23,7 +28,7 @@ func (r *repo) GetRef(name string) (object.ID, error) {
 	if err != nil {
 		return id, err
 	}
-	err = r.get(key, &id)
+	err = mapRefErr(r.get(key, &id))
 	return id, err
 }
 
@@ -39,12 +44,12 @@ func (r *repo) UpdateRef(name string, oldID, newID object.ID) error {
 				return err
 			}
 			if id != oldID {
-				return errors.New("repository/appengine: ref old value not what expected")
+				return repository.ErrRefMismatch
 			}
 		} else {
-			if err != repository.ErrNotExist {
+			if err != datastore.ErrNoSuchEntity {
 				if err == nil {
-					return errors.New("repository/appengine: ref exists")
+					return repository.ErrRefExist
 				}
 				return err
 			}
@@ -55,7 +60,7 @@ func (r *repo) UpdateRef(name string, oldID, newID object.ID) error {
 			}
 			return tr.put(key, &newID)
 		} else if oldID != object.ZeroID {
-			return tr.del(key)
+			return mapRefErr(tr.del(key))
 		} else {
 			return nil
 		}

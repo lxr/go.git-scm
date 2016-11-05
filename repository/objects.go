@@ -16,7 +16,7 @@ func HasObject(r Interface, id object.ID) (bool, error) {
 	switch err {
 	case nil:
 		return true, nil
-	case ErrNotExist:
+	case ErrObjectNotExist:
 		return false, nil
 	default:
 		return false, err

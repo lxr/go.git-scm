@@ -22,13 +22,6 @@ import (
 	"github.com/lxr/go.git-scm/repository"
 )
 
-func mapErr(err error) error {
-	if err == datastore.ErrNoSuchEntity {
-		return repository.ErrNotExist
-	}
-	return err
-}
-
 // InitRepository initializes a new Git repository in the App Engine
 // datastore using the given context.  A repository is stored in the
 // datastore using six kinds of entities: HEADs, refs, commits, trees,
@@ -124,7 +117,7 @@ func (r *repo) get(key *datastore.Key, dst interface{}) error {
 	if _, err := memcache.Gob.Get(r.ctx, s, dst); err != memcache.ErrCacheMiss {
 		return err
 	}
-	if err := mapErr(datastore.Get(r.ctx, key, dst)); err != nil {
+	if err := datastore.Get(r.ctx, key, dst); err != nil {
 		return err
 	}
 	memcache.Gob.Set(r.ctx, &memcache.Item{Key: s, Object: dst})
@@ -142,5 +135,5 @@ func (r *repo) put(key *datastore.Key, src interface{}) error {
 
 func (r *repo) del(key *datastore.Key) error {
 	memcache.Delete(r.ctx, r.memkey(key))
-	return mapErr(datastore.Delete(r.ctx, key))
+	return datastore.Delete(r.ctx, key)
 }

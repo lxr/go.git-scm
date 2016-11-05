@@ -49,7 +49,7 @@ func (r *repo) getObject(id object.ID) (object.Interface, error) {
 			return nil, err
 		}
 	}
-	return nil, repository.ErrNotExist
+	return nil, repository.ErrObjectNotExist
 }
 
 func (r *repo) putObject(obj object.Interface) (object.ID, []byte, error) {

@@ -8,13 +8,14 @@ import (
 	"github.com/lxr/go.git-scm/object"
 )
 
-// ErrNotExist is returned when the named object or ref does not
-// exist.
-var ErrNotExist = errors.New("repository: object does not exist")
-
-// ErrInvalidRef is returned when a refname argument is not
-// well-formed.
-var ErrInvalidRef = errors.New("repository: invalid refname")
+// Repository error conditions.
+var (
+	ErrInvalidRef     = errors.New("repository: malformed refname")
+	ErrRefMismatch    = errors.New("repository: ref value is different from expected")
+	ErrRefExist       = errors.New("repository: ref already exists")
+	ErrRefNotExist    = errors.New("repository: ref does not exist")
+	ErrObjectNotExist = errors.New("repository: object does not exist")
+)
 
 // Interface defines the interface of a Git repository.  A Git
 // repository is a database storing three types of objects:
@@ -48,13 +49,15 @@ type Interface interface {
 	// oldID to newID.  It is an error if either the ref does
 	// not point at oldID at the time of the call, or the object
 	// named by newID does not exist in the repository.  The
-	// function is special-cased when either oldID or newID is zero:
+	// function is special-cased when one or both of oldID and newID
+	// is zero:
 	//
 	//  - if oldID is zero, the ref is created if it does not
-	//    exist;
+	//    exist, and ErrRefExist is returned if it does;
 	//  - if newID is zero, the ref is deleted if it exists;
-	//  - if both newID and oldID are zero, UpdateRef confirms that
-	//    the named ref does not exist in the repository.
+	//  - if both newID and oldID are zero, UpdateRef returns with
+	//    a nil error only if the named ref does not exist in the
+	//    repository.
 	UpdateRef(name string, oldID, newID object.ID) error
 
 	// ListRefs lists all refs in the repository in ascending order
