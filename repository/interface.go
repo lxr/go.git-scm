@@ -26,6 +26,10 @@ var (
 //  - HEAD, a special singleton pointing to the "current" ref.
 //
 // Git objects are identified by their IDs and refs by their names.
+//
+// Implementations must provide safe concurrent access to the
+// underlying datastore, even between different instances with the same
+// backing store.
 type Interface interface {
 	// BUG(lor): Pseudo- and symbolic refs, commit hooks etc. are
 	// beyond the scope of Interface.  It supports only the bare
