@@ -119,6 +119,18 @@ func (r *Reader) Len() int64 {
 
 // ReadObject returns the next object in the stream, or nil, io.EOF if there
 // are no more objects.
+//
+// When err is one of the following values, the Reader is guaranteed to
+// be in a consistent state, i.e. it is safe to continue reading objects
+// from it:
+//
+//  - ErrBadOffset
+//  - repository.ErrObjectNotExist
+//  - ErrDelta
+//  - ErrDeltaLength
+//  - any errors returned by the GetObject and PutObject methods of the
+//    repo passed to the NewReader call
+//  - any object.TypeError instance
 func (r *Reader) ReadObject() (obj object.Interface, err error) {
 	// check if there are objects to read, and if so, record the
 	// current position as the start of a new object
@@ -135,6 +147,7 @@ func (r *Reader) ReadObject() (obj object.Interface, err error) {
 
 	// if object is a delta, read its base object reference
 	var baseID object.ID
+	var errBase error
 	switch objType {
 	case offsetDelta:
 		negOfs, err := readBase128MBE(r.r)
@@ -142,12 +155,20 @@ func (r *Reader) ReadObject() (obj object.Interface, err error) {
 		case err != nil:
 			return nil, err
 		case int64(negOfs) < 0:
+			// XXX(lor): The stream is technically in a
+			// consistent state when this error happens, so
+			// it could be returned in errBase; but to make
+			// any use of it I'd have to document and
+			// probably make it a separate error variable,
+			// which I would prefer not to.
 			return nil, errors.New("packfile: delta offset overflows int64")
 		}
 		var ok bool
 		baseID, ok = r.ofs[pos-int64(negOfs)]
 		if !ok {
-			return nil, ErrBadOffset
+			// cache the error for later returning once the
+			// delta body has been read
+			errBase = ErrBadOffset
 		}
 	case refDelta:
 		if _, err = io.ReadFull(r.r, baseID[:]); err != nil {
@@ -169,8 +190,21 @@ func (r *Reader) ReadObject() (obj object.Interface, err error) {
 		return
 	}
 
+	// the underlying stream isn't read after this point, so
+	// decrement the number of remaining objects
+	r.n--
+
+	// XXX(lor): The marshalObj and unmarshalObj calls in the
+	// following code can return IO errors on malformed object
+	// data.  The functions don't touch r.r, so they can't throw
+	// it out of sync, but no effort has been made to make this
+	// distinction visible to the user.
+
 	// if object is a delta, retrieve its base object and apply
 	// the delta to it
+	if errBase != nil {
+		return nil, errBase
+	}
 	if baseID != object.ZeroID {
 		var (
 			base     object.Interface
@@ -201,13 +235,17 @@ func (r *Reader) ReadObject() (obj object.Interface, err error) {
 		return
 	}
 
-	// update bookkeeping data and return the object
+	// add the object to the working repo and offset map and return
 	id, err := r.repo.PutObject(obj)
 	if err != nil {
-		return
+		// Even if PutObject fails, we know that obj is a valid
+		// object, so compute and store its ID in r.ofs.  Any
+		// deltas using it as a base will fail (as the object
+		// doesn't exist in r.repo), but at least they won't do
+		// so with an incorrect ErrBadOffset error.
+		id = hashObj(objType, data)
 	}
 	r.ofs[pos] = id
-	r.n--
 	return
 }
 
