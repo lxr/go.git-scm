@@ -16,6 +16,7 @@ import (
 
 	"github.com/lxr/go.git-scm/object"
 	"github.com/lxr/go.git-scm/repository"
+	"github.com/lxr/go.git-scm/repository/mem"
 )
 
 // If one happens to read the exact length of the compressed data from a
@@ -81,10 +82,10 @@ func (r *Reader) newZlibReader(rr io.Reader) (io.ReadCloser, error) {
 
 // NewReader creates a new Reader from r.  It returns an error if r
 // does not begin with a packfile header, if the packfile version is
-// unsupported, or if trying to read the header failed.  repo will be
-// used to resolve delta objects into full ones; it must contain all
-// potential base objects.  (The caller may have to enforce this by
-// adding each read object to the repository.)  It is the caller's
+// unsupported, or if trying to read the header failed.  The repository
+// repo is used as working storage: every read object is put to it, and
+// the base object of every delta is looked up from it.  If repo is nil,
+// a temporary in-memory database is used.  It is the caller's
 // responsibility to call Close on the Reader after all objects have
 // been read.
 func NewReader(r io.Reader, repo repository.Interface) (*Reader, error) {
@@ -98,6 +99,9 @@ func NewReader(r io.Reader, repo repository.Interface) (*Reader, error) {
 		return nil, ErrHeader
 	case h.Version < 2 || h.Version > 3:
 		return nil, ErrVersion
+	}
+	if repo == nil {
+		repo = mem.NewRepository()
 	}
 	return &Reader{
 		r:    dr,
@@ -198,7 +202,11 @@ func (r *Reader) ReadObject() (obj object.Interface, err error) {
 	}
 
 	// update bookkeeping data and return the object
-	r.ofs[pos] = hashObj(objType, data)
+	id, err := r.repo.PutObject(obj)
+	if err != nil {
+		return
+	}
+	r.ofs[pos] = id
 	r.n--
 	return
 }

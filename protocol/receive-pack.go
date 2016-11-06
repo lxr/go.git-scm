@@ -104,12 +104,7 @@ func unpack(repo repository.Interface, r io.Reader) error {
 		return err
 	}
 	for pfr.Len() > 0 {
-		obj, err := pfr.ReadObject()
-		if err != nil {
-			return err
-		}
-		_, err = repo.PutObject(obj)
-		if err != nil {
+		if _, err := pfr.ReadObject(); err != nil {
 			return err
 		}
 	}
