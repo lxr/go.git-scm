@@ -117,8 +117,8 @@ func (r *Reader) Len() int64 {
 	return r.n
 }
 
-// ReadObject returns the next object in the stream, or nil, io.EOF if there
-// are no more objects.
+// ReadObject returns the next object in the stream.  Clients should
+// use Len to detect end-of-file.
 //
 // When err is one of the following values, the Reader is guaranteed to
 // be in a consistent state, i.e. it is safe to continue reading objects
