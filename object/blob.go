@@ -5,8 +5,7 @@ package object
 type Blob []byte
 
 func (b *Blob) MarshalBinary() ([]byte, error) {
-	text, _ := b.MarshalText()
-	return prependHeader(TypeBlob, text)
+	return prependHeader(TypeBlob, *b)
 }
 
 func (b *Blob) UnmarshalBinary(data []byte) error {
