@@ -22,6 +22,7 @@ import (
 type digestReader struct {
 	r      flate.Reader
 	pos    int64
+	bufDig *bufio.Writer // WriteByte wrapper for digest
 	digest hash.Hash
 }
 
@@ -30,13 +31,13 @@ func newDigestReader(r io.Reader, h hash.Hash) *digestReader {
 	if !ok {
 		fr = bufio.NewReader(r)
 	}
-	return &digestReader{fr, 0, h}
+	return &digestReader{fr, 0, bufio.NewWriterSize(h, h.BlockSize()), h}
 }
 
 func (r *digestReader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
 	r.pos += int64(n)
-	r.digest.Write(p[:n])
+	r.bufDig.Write(p[:n])
 	return n, err
 }
 
@@ -46,11 +47,12 @@ func (r *digestReader) ReadByte() (byte, error) {
 		return 0, err
 	}
 	r.pos++
-	r.digest.Write([]byte{c})
+	r.bufDig.WriteByte(c)
 	return c, err
 }
 
 func (r *digestReader) Sum(b []byte) []byte {
+	r.bufDig.Flush()
 	return r.digest.Sum(b)
 }
 
