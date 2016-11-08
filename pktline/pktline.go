@@ -4,6 +4,7 @@
 package pktline
 
 import (
+	"bytes"
 	"errors"
 	"io"
 )
@@ -58,11 +59,12 @@ func writeLineLen(w io.Writer, x int) error {
 type Reader struct {
 	r     io.Reader
 	atEOF bool
+	line  bytes.Buffer
 }
 
 // NewReader creates a new Reader from r.
 func NewReader(r io.Reader) *Reader {
-	return &Reader{r, false}
+	return &Reader{r: r, atEOF: false}
 }
 
 // Next advances the Reader past a flush-pkt.  It should only be called
@@ -87,8 +89,8 @@ func (r *Reader) ReadLine() (string, error) {
 		r.atEOF = true
 		return "", io.EOF
 	}
-	p := make([]byte, n)
-	n, err = io.ReadFull(r.r, p)
+	r.line.Reset()
+	_, err = io.CopyN(&r.line, r.r, int64(n))
 	// BUG(lor): Reader.ReadLine can return "", io.ErrUnexpectedEOF
 	// if the stream ends immediately after a non-zero pkt-line
 	// length or in the middle of one, so despite what the docs
@@ -97,7 +99,7 @@ func (r *Reader) ReadLine() (string, error) {
 	if err == io.EOF {
 		err = io.ErrUnexpectedEOF
 	}
-	return string(p[:n]), err
+	return r.line.String(), err
 }
 
 // A Writer writes pkt-line records to an underlying writer.
