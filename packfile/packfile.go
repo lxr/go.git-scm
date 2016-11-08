@@ -8,6 +8,7 @@
 package packfile
 
 import (
+	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
 	"encoding/binary"
@@ -67,6 +68,7 @@ type Reader struct {
 	n    int64
 	ofs  map[int64]object.ID
 	repo repository.Interface
+	buf  bytes.Buffer
 }
 
 // newZlibReader resets the cached io.ReadCloser to read from rr and
@@ -182,10 +184,11 @@ func (r *Reader) ReadObject() (obj object.Interface, err error) {
 		return
 	}
 	defer zr.Close()
-	data := make([]byte, size)
-	if _, err = io.ReadFull(zr, data); err != nil {
+	r.buf.Reset()
+	if _, err = io.CopyN(&r.buf, zr, size); err != nil {
 		return
 	}
+	data := r.buf.Bytes()
 	if err = flushZlib(zr); err != nil {
 		return
 	}
