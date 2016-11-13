@@ -1,10 +1,8 @@
 // Package http implements the Git smart HTTP protocol.  See
 // https://www.kernel.org/pub/software/scm/git/docs/technical/http-protocol.html
 // for details.  Its functions have the same semantics as their
-// namesakes in package protocol.  The functions handle errors by
-// printing them to w with http.Error; for UploadPack this means that
-// an error string may be written to w after the HTTP headers have
-// already been sent with status code 200.
+// namesakes in package protocol.  Errors are handled by printing them
+// to the http.ResponseWriter with http.Error.
 package http
 
 // BUG(lor): This package is implemented as a thin wrapper around the
@@ -52,6 +50,10 @@ func UploadPack(repo repository.Interface, w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-result")
 	w.Header().Set("Cache-Control", "no-cache")
 	if err := protocol.UploadPack(repo, w, r.Body); err != nil {
+		// BUG(lor): As protocol.UploadPack can return errors
+		// even after it has written something to its writer
+		// argument, it is possible for UploadPack to fail even
+		// after a 200 response has been sent.
 		httpError(w, err)
 		return
 	}
