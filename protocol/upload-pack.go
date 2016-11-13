@@ -14,11 +14,15 @@ import (
 // BUG(lor): UploadPack does not understand the
 // shallow and deepen commands.
 
+// BUG(lor): UploadPack's support for non-multi_ack_detailed operation
+// is experimental.
+
 // UploadPack reads from r a pkt-line stream of refs that the client
 // wants and has and writes a packfile bridging the two sets to w.
 func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	pktr := pktline.NewReader(r)
-	var want []object.ID
+	want := make(map[object.ID]bool)
+	var start, end []object.ID
 	var caps CapList
 	for {
 		var id object.ID
@@ -27,7 +31,8 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 		} else if n < 1 {
 			return err
 		}
-		want = append(want, id)
+		want[id] = true
+		start = append(start, id)
 	}
 	if len(want) == 0 {
 		return nil
@@ -37,21 +42,90 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	}
 
 	pktw := pktline.NewWriter(w)
-	pktr.Next()
-	common, err := negotiate(repo, pktw, pktr, caps["multi_ack_detailed"])
-	switch {
-	case err == io.EOF:
-		// If pktr does not end with a done line, the client
-		// will send the rest of its haves in a separate
-		// request.  We quit early and don't send a packfile
-		// in that case.
-		return nil
-	case err != nil:
-		return err
+	for {
+		pktr.Next()
+		have, err := readHaveLines(pktr)
+		if len(have) == 0 && err == io.ErrUnexpectedEOF {
+			return nil
+		} else if err != io.EOF && err != nil {
+			return err
+		}
+		// XXX(lor): This is potentially a lot of repository
+		// walking.  Can it be made any cheaper?
+		for wantID := range want {
+			err := repository.Walk(repo, []object.ID{wantID}, nil, func(id object.ID, obj object.Interface, err error) error {
+				if err != nil {
+					return err
+				}
+				// BUG(lor): UploadPack can neglect to
+				// report common objects as common if
+				// they are parents of another common
+				// object, as the repository traversal
+				// never proceeds past a common object.
+				// As have lines are sent in reverse
+				// chronological order, this is actually
+				// very common.
+				if _, ok := have[id]; ok {
+					delete(want, wantID)
+					have[id] = true
+					end = append(end, id)
+					return repository.SkipObject
+				}
+				// We assume that wants and haves never
+				// point at trees, blobs or Git
+				// submodules, so avoid recursing deeper
+				// into non-commit and non-tag objects.
+				switch obj.(type) {
+				case *object.Commit, *object.Tag:
+					return nil
+				default:
+					return repository.SkipObject
+				}
+			})
+			if err != nil {
+				return err
+			}
+		}
+		if caps["multi_ack_detailed"] {
+			for haveID, common := range have {
+				if common {
+					fmtLprintf(pktw, "ACK %s common\n", haveID)
+				}
+			}
+			if len(want) == 0 {
+				fmtLprintf(pktw, "ACK %s ready\n", end[len(end)-1])
+				if caps["no-done"] && err == nil {
+					// XXX(lor): The protocol
+					// capability documentation
+					// says, "the sender is free to
+					// immediately send a pack
+					// following its first 'ACK
+					// obj-id ready' message", but
+					// what it really means is that
+					// the sender is free to behave
+					// as if a "done" had been sent
+					// immediately after the current
+					// have block's flush-pkt.
+					fmtLprintf(pktw, "NAK\n")
+					err = io.EOF
+				}
+			}
+		}
+		// BUG(lor): When not in multi_ack_detailed mode,
+		// UploadPack ACKs the last of the common commits
+		// identifies, not the first one.
+		if len(end) > 0 && (err == io.EOF) == caps["multi_ack_detailed"] {
+			fmtLprintf(pktw, "ACK %s\n", end[len(end)-1])
+		} else {
+			fmtLprintf(pktw, "NAK\n")
+		}
+		if err == io.EOF {
+			break
+		}
 	}
 
 	var objs []object.Interface
-	err = repository.Walk(repo, want, common, func(id object.ID, obj object.Interface, err error) error {
+	err := repository.Walk(repo, start, end, func(id object.ID, obj object.Interface, err error) error {
 		if err != nil {
 			return err
 		}
@@ -64,57 +138,31 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	return writePack(w, objs)
 }
 
-// negotiate loops over the substreams of pktr until it encounters
-// either a pkt-line consisting of "done\n" or an error, and returns the
-// list of all object IDs given in "have" pkt-lines that exist in repo.
-// ACK and NAK lines are written to pktw depending on the multiAck mode.
-// If pktr ends before a done line is received, the error is io.EOF.
-func negotiate(repo repository.Interface, pktw *pktline.Writer, pktr *pktline.Reader, multiAck bool) (common []object.ID, err error) {
-	var (
-		ok   bool
-		msg  string
-		id   object.ID
-		last object.ID
-	)
+// readHaveLines reads a flush-pkt-or-"done"-terminated sequence of
+// "have obj-id" lines from pktr and returns the obj-ids as a boolean
+// map.  The map values are false, so as to allow client code to mark
+// the actually common objects as true.  If the sequence ends in a
+// flush-pkt, the error is nil; if it ends in a "done", the error is
+// io.EOF.  A sequence ending in "done" is not necessarily empty, so
+// client code needs to remember to process the map even on an io.EOF
+// error.
+func readHaveLines(pktr *pktline.Reader) (map[object.ID]bool, error) {
+	have := make(map[object.ID]bool)
 	for {
-		msg, err = pktr.ReadLine()
+		var cmd string
+		var id object.ID
+		n, err := fmtLscanf(pktr, "%s %s", &cmd, &id)
 		switch {
-		case err == io.EOF: // flush-pkt
-			if multiAck || len(common) == 0 {
-				fmtLprintf(pktw, "NAK\n")
-			}
-			pktr.Next()
-			continue
-		case err == io.ErrUnexpectedEOF && msg == "": // end of stream
-			err = io.EOF
-			return
-		case err != nil:
-			return
-		case msg == "done\n":
-			if len(common) == 0 {
-				fmtLprintf(pktw, "NAK\n")
-			} else if multiAck {
-				fmtLprintf(pktw, "ACK %s\n", last)
-			}
-			return
-		}
-
-		_, err = fmt.Sscanf(msg, "have %s\n", &id)
-		if err != nil {
-			return
-		}
-		ok, err = repository.HasObject(repo, id)
-		if err != nil {
-			return
-		}
-		if ok {
-			if multiAck {
-				fmtLprintf(pktw, "ACK %s common\n", id)
-			} else if len(common) == 0 {
-				fmtLprintf(pktw, "ACK %s\n", id)
-			}
-			last = id
-			common = append(common, last)
+		case n == 0 && err == io.EOF: // flush-pkt
+			return have, nil
+		case n == 1 && cmd == "done":
+			return have, io.EOF
+		case n == 2 && cmd == "have":
+			have[id] = false
+		case n == 2 && cmd != "have":
+			return have, fmt.Errorf("bad command: %q", cmd)
+		default:
+			return have, err
 		}
 	}
 }

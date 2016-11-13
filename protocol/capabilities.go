@@ -10,6 +10,7 @@ import (
 var Capabilities = CapList{
 	"delete-refs":        true,
 	"multi_ack_detailed": true,
+	"no-done":            true,
 	"ofs-delta":          true,
 	"report-status":      true,
 }

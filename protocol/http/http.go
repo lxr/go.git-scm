@@ -45,6 +45,13 @@ func AdvertiseRefs(repo repository.Interface, w http.ResponseWriter, r *http.Req
 	io.Copy(w, buf)
 }
 
+// BUG(lor): The canonical Git client appears to expect the server to
+// maintain packfile negotiation state between POST requests when
+// pulling over the smart HTTP protocol without multi_ack.  As
+// protocol.UploadPack does not maintain state between calls,
+// UploadPack only works with HTTP clients that understand the
+// multi_ack_detailed capability.
+
 // UploadPack is invoked using POST on $GIT_URL/git-upload-pack.
 func UploadPack(repo repository.Interface, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-result")
