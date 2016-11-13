@@ -32,7 +32,7 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 	if len(want) == 0 {
 		return nil
 	}
-	if d := caps.diff(Capabilities); len(d) > 0 {
+	if d := caps.sub(Capabilities); len(d) > 0 {
 		return fmt.Errorf("unrecognized capabilities: %s", d)
 	}
 

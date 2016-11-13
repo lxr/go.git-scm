@@ -17,9 +17,9 @@ var Capabilities = CapList{
 // A CapList represents a set of Git protocol capabilities.
 type CapList map[string]bool
 
-// diff returns a capability listing containing those capabilities in c
+// sub returns a capability listing containing those capabilities in c
 // that are not in d.
-func (c CapList) diff(d CapList) CapList {
+func (c CapList) sub(d CapList) CapList {
 	e := make(CapList)
 	for cap, ok := range c {
 		if ok && !d[cap] {
