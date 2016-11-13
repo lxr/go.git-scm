@@ -124,18 +124,37 @@ func UploadPack(repo repository.Interface, w io.Writer, r io.Reader) error {
 		}
 	}
 
-	var objs []object.Interface
+	var hdrs objHeaderSlice
 	err := repository.Walk(repo, start, end, func(id object.ID, obj object.Interface, err error) error {
 		if err != nil {
 			return err
 		}
-		objs = append(objs, obj)
+		hdrs = append(hdrs, objHeader{
+			ID:   id,
+			Type: object.TypeOf(obj),
+			Size: objectSizeOf(obj),
+		})
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	return writePack(w, objs)
+	sort.Sort(hdrs)
+
+	pfw, err := packfile.NewWriter(w, int64(len(hdrs)))
+	if err != nil {
+		return err
+	}
+	for _, hdr := range hdrs {
+		obj, err := repo.GetObject(hdr.ID)
+		if err != nil {
+			return err
+		}
+		if err := pfw.WriteObject(obj); err != nil {
+			return err
+		}
+	}
+	return pfw.Close()
 }
 
 // readHaveLines reads a flush-pkt-or-"done"-terminated sequence of
@@ -201,43 +220,34 @@ func objectSizeOf(obj object.Interface) int {
 	}
 }
 
-// objSlice is a wrapper type for sorting Git object slices by type
-// and size.  Packfiles written in this order compress better.
-type objSlice []object.Interface
-
-func (objs objSlice) Len() int {
-	return len(objs)
+// An objHeader contains the information necessary for sorting a Git
+// object for good delta compression.
+type objHeader struct {
+	ID   object.ID
+	Type object.Type
+	Size int
 }
 
-func (objs objSlice) Less(i, j int) bool {
-	a := objs[i]
-	b := objs[j]
-	aType := object.TypeOf(a)
-	bType := object.TypeOf(b)
+// objHeaderSlice implements the compression-optimized total order:
+// together by type (ascending in this implementation) and descending
+// by size.
+type objHeaderSlice []objHeader
+
+func (hdrs objHeaderSlice) Len() int {
+	return len(hdrs)
+}
+
+func (hdrs objHeaderSlice) Less(i, j int) bool {
 	switch {
-	case aType < bType:
+	case hdrs[i].Type < hdrs[j].Type:
 		return true
-	case aType > bType:
+	case hdrs[i].Type > hdrs[j].Type:
 		return false
-	default: // aType == bType
-		return objectSizeOf(a) >= objectSizeOf(b)
+	default: // hdrs[i].Type == hdrs[j].Type
+		return hdrs[i].Size >= hdrs[j].Size
 	}
 }
 
-func (objs objSlice) Swap(i, j int) {
-	objs[i], objs[j] = objs[j], objs[i]
-}
-
-func writePack(w io.Writer, objs []object.Interface) error {
-	pfw, err := packfile.NewWriter(w, int64(len(objs)))
-	if err != nil {
-		return err
-	}
-	sort.Sort(objSlice(objs))
-	for _, obj := range objs {
-		if err := pfw.WriteObject(obj); err != nil {
-			return err
-		}
-	}
-	return pfw.Close()
+func (hdrs objHeaderSlice) Swap(i, j int) {
+	hdrs[i], hdrs[j] = hdrs[j], hdrs[i]
 }
