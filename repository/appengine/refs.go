@@ -58,7 +58,7 @@ func (r *repo) UpdateRef(name string, oldID, newID object.ID) error {
 			}
 			return mapRefErr(tr.del(key))
 		default:
-			if _, err := r.GetObject(newID); err != nil {
+			if _, err := tr.GetObject(newID); err != nil {
 				return err
 			}
 			return tr.put(key, &newID)
